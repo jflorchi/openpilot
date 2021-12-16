@@ -54,7 +54,7 @@ class LongControl():
     self.pid.reset()
     self.v_pid = v_pid
 
-  def update(self, active, CS, CP, long_plan, accel_limits, t_since_plan):
+  def update(self, active, CS, CP, last_actuators, long_plan, accel_limits, t_since_plan):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     # Interp control trajectory
     speeds = long_plan.speeds
@@ -99,9 +99,8 @@ class LongControl():
       # Freeze the integrator so we don't accelerate to compensate, and don't allow positive acceleration
       prevent_overshoot = not CP.stoppingControl and CS.vEgo < 1.5 and v_target_future < 0.7 and v_target_future < self.v_pid
       deadzone = interp(CS.vEgo, CP.longitudinalTuning.deadzoneBP, CP.longitudinalTuning.deadzoneV)
-      freeze_integrator = prevent_overshoot
 
-      output_accel = self.pid.update(self.v_pid, CS.vEgo, speed=CS.vEgo, deadzone=deadzone, feedforward=a_target, freeze_integrator=freeze_integrator)
+      output_accel = self.pid.update(self.v_pid, CS.vEgo, last_actuators.accel, speed=CS.vEgo, deadzone=deadzone, feedforward=a_target)
 
       if prevent_overshoot:
         output_accel = min(output_accel, 0.0)
