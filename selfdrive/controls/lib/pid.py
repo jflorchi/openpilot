@@ -26,7 +26,6 @@ class PIController():
     self.neg_limit = neg_limit
 
     self.i_unwind_rate = 0.3 / rate
-    self.i_backfeed_rate = 2.0 / rate
     self.i_rate = 1.0 / rate
 
     self.reset()
@@ -53,27 +52,21 @@ class PIController():
     self.p = error * self.k_p
     self.f = feedforward * self.k_f
 
-    # Clip integrator based on the last output value
-    #TODO require last_output by position only
-    #TODO test long performance (freeze integrator removal)
-    #TODO (option) i_unwind_rate can be used instead of i_backfeed_rate
-    if last_output is not None:
-      if not freeze_integrator:
-        control_clip = self.control_last - last_output
-        self.i = self.i +  self.k_i * (error * self.i_rate - control_clip * self.i_backfeed_rate)
-    else:
-        if override:
-          self.i -= self.i_unwind_rate * float(np.sign(self.i))
-        else:
-          i = self.i + error * self.k_i * self.i_rate
-          control = self.p + self.f + i
+    if last_output is None:
+      clipped_control_last = last_output
 
-          # Update when changing i will move the control away from the limits
-          # or when i will move towards the sign of the error
-          if ((error >= 0 and (control <= self.pos_limit or i < 0.0)) or
-              (error <= 0 and (control >= self.neg_limit or i > 0.0))) and \
-             not freeze_integrator:
-            self.i = i
+    if override:
+      self.i -= self.i_unwind_rate * float(np.sign(self.i))
+    else:
+      i = self.i + error * self.k_i * self.i_rate
+      control = self.p + self.f + i
+
+      # Update when changing i will move the control away from the limits
+      # or when i will move towards the sign of the error
+      if ((error >= 0 and (control <= self.pos_limit or i < 0.0) and clipped_control_last >= self.control_last) or
+          (error <= 0 and (control >= self.neg_limit or i > 0.0) and clipped_control_last <= self.control_last)) and \
+         not freeze_integrator:
+        self.i = i
 
     control = self.p + self.i + self.f
 
