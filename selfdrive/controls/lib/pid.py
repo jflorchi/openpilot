@@ -52,8 +52,10 @@ class PIController():
     self.p = error * self.k_p
     self.f = feedforward * self.k_f
 
-    if last_output is None:
+    if last_output is not None:
       clipped_control_last = last_output
+    else:
+      clipped_control_last = self.control_last
 
     if override:
       self.i -= self.i_unwind_rate * float(np.sign(self.i))
