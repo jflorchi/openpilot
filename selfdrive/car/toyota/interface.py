@@ -118,7 +118,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 14.3
       tire_stiffness_factor = 0.7933
       ret.mass = 3585. * CV.LB_TO_KG + STD_CARGO_KG  # Average between ICE and Hybrid
-      set_lat_tune(ret.lateralTuning, LatTunes.PID_D)
+      set_lat_tune(ret.lateralTuning, LatTunes.PID_J)
 
       # 2019+ Rav4 TSS2 uses two different steering racks and specific tuning seems to be necessary.
       # See https://github.com/commaai/openpilot/pull/21429#issuecomment-873652891
@@ -133,7 +133,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 13.9
       tire_stiffness_factor = 0.444  # not optimized yet
       ret.mass = 3060. * CV.LB_TO_KG + STD_CARGO_KG
-      set_lat_tune(ret.lateralTuning, LatTunes.PID_D)
+      set_lat_tune(ret.lateralTuning, LatTunes.PID_J)
 
     elif candidate in (CAR.LEXUS_ES_TSS2, CAR.LEXUS_ESH_TSS2, CAR.LEXUS_ESH):
       stop_and_go = True
@@ -141,7 +141,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerRatio = 16.0  # not optimized
       tire_stiffness_factor = 0.444  # not optimized yet
       ret.mass = 3677. * CV.LB_TO_KG + STD_CARGO_KG  # mean between min and max
-      set_lat_tune(ret.lateralTuning, LatTunes.PID_D)
+      set_lat_tune(ret.lateralTuning, LatTunes.PID_J)
 
     elif candidate == CAR.SIENNA:
       stop_and_go = True
