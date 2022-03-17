@@ -126,6 +126,7 @@ struct FrameData {
   # Timestamps
   timestampEof @2 :UInt64;
   timestampSof @8 :UInt64;
+  processingTime @23 :Float32;
 
   # Exposure
   integLines @4 :Int32;
@@ -289,6 +290,7 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   networkType @22 :NetworkType;
   networkInfo @31 :NetworkInfo;
   networkStrength @24 :NetworkStrength;
+  networkMetered @41 :Bool;
   lastAthenaPingTime @32 :UInt64;
 
   started @11 :Bool;
@@ -427,6 +429,7 @@ struct PandaState @0xa7649e2575e4591e {
     interruptRateKlineInit @19;
     interruptRateClockSource @20;
     interruptRateTick @21;
+    interruptRateExti @22;
     # Update max fault type in boardd when adding faults
   }
 
@@ -688,6 +691,7 @@ struct ControlsState @0x97ff69c53601abf1 {
 
 struct ModelDataV2 {
   frameId @0 :UInt32;
+  frameIdExtra @20 :UInt32;
   frameAge @1 :UInt32;
   frameDropPerc @2 :Float32;
   timestampEof @3 :UInt64;
@@ -1276,6 +1280,9 @@ struct DriverState {
   phoneUse @22 :Float32;
   occludedProb @23 :Float32;
 
+  readyProb @24 :List(Float32);
+  notReadyProb @25 :List(Float32);
+
   irPwrDEPRECATED @10 :Float32;
   descriptorDEPRECATED @1 :List(Float32);
   stdDEPRECATED @2 :Float32;
@@ -1285,6 +1292,7 @@ struct DriverMonitoringState @0xb83cda094a1da284 {
   events @0 :List(Car.CarEvent);
   faceDetected @1 :Bool;
   isDistracted @2 :Bool;
+  distractedType @17 :UInt32;
   awarenessStatus @3 :Float32;
   posePitchOffset @6 :Float32;
   posePitchValidCount @7 :UInt32;
