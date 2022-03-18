@@ -16,7 +16,7 @@ class CarControllerParams:
 class CAR:
   BODY = "COMMA BODY"
 
-  CAR_INFO: Dict[str, Union[CarInfo, List[CarInfo]]] = {
+CAR_INFO: Dict[str, Union[CarInfo, List[CarInfo]]] = {
   CAR.BODY: CarInfo("Comma Body", "All"),
 }
 
