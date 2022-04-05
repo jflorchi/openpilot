@@ -1,5 +1,5 @@
 from cereal import car
-from common.conversions import Conversions as CV
+from selfdrive.config import Conversions as CV
 from common.numpy_fast import mean
 from common.filter_simple import FirstOrderFilter
 from common.realtime import DT_CTRL
