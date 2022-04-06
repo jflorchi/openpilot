@@ -19,7 +19,7 @@ class CarInterface(CarInterfaceBase):
     ret = CarInterfaceBase.get_std_params(candidate, fingerprint)
 
     ret.carName = "toyota"
-    ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.toyota)]
+    ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
     ret.safetyConfigs[0].safetyParam = EPS_SCALE[candidate]
 
     ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
@@ -62,11 +62,12 @@ class CarInterface(CarInterfaceBase):
       set_lat_tune(ret.lateralTuning, LatTunes.PID_A)
 
     elif candidate == CAR.COROLLA_2010:
-      ret.wheelbase = 2.70
-      ret.steerRatio = 18.27
+      ret.wheelbase = 2.6
+      ret.steerRatio = 17.4
       tire_stiffness_factor = 0.444  # not optimized yet
-      ret.mass = 2860. * CV.LB_TO_KG + STD_CARGO_KG  # mean between normal and hybrid
-      set_lat_tune(ret.lateralTuning, LatTunes.PID_A)
+      ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG  # mean between normal and hybrid
+      ret.steerActuatorDelay = 0.29
+      set_lat_tune(ret.lateralTuning, LatTunes.INDI_ROLLA)
 
     elif candidate in (CAR.LEXUS_RX, CAR.LEXUS_RXH, CAR.LEXUS_RX_TSS2, CAR.LEXUS_RXH_TSS2):
       stop_and_go = True

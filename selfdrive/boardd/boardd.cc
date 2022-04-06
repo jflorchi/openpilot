@@ -246,6 +246,7 @@ void can_recv_thread(std::vector<Panda *> pandas) {
   uint64_t next_frame_time = nanos_since_boot() + dt;
   std::vector<can_frame> raw_can_data;
 
+  LOGW("IDK");
   while (!do_exit && check_all_connected(pandas)) {
     bool comms_healthy = true;
     raw_can_data.clear();
@@ -253,6 +254,7 @@ void can_recv_thread(std::vector<Panda *> pandas) {
       comms_healthy &= panda->can_receive(raw_can_data);
     }
 
+    LOGW("IDK2");
     MessageBuilder msg;
     auto evt = msg.initEvent();
     evt.setValid(comms_healthy);
