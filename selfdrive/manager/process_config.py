@@ -10,9 +10,9 @@ procs = [
   # due to qualcomm kernel bugs SIGKILLing camerad sometimes causes page table corruption
   NativeProcess("camerad", "selfdrive/camerad", ["./camerad"], unkillable=True, driverview=True),
   NativeProcess("clocksd", "selfdrive/clocksd", ["./clocksd"]),
-  NativeProcess("dmonitoringmodeld", "selfdrive/modeld", ["./dmonitoringmodeld"], enabled=(not PC or WEBCAM), driverview=True),
+#  NativeProcess("dmonitoringmodeld", "selfdrive/modeld", ["./dmonitoringmodeld"], enabled=(not PC or WEBCAM), driverview=True),
   NativeProcess("logcatd", "selfdrive/logcatd", ["./logcatd"]),
-  NativeProcess("loggerd", "selfdrive/loggerd", ["./loggerd"]),
+#  NativeProcess("loggerd", "selfdrive/loggerd", ["./loggerd"]),
   NativeProcess("modeld", "selfdrive/modeld", ["./modeld"]),
   NativeProcess("navd", "selfdrive/ui/navd", ["./navd"], enabled=(PC or TICI), persistent=True),
   NativeProcess("proclogd", "selfdrive/proclogd", ["./proclogd"]),
@@ -25,7 +25,7 @@ procs = [
   PythonProcess("calibrationd", "selfdrive.locationd.calibrationd"),
   PythonProcess("controlsd", "selfdrive.controls.controlsd"),
   PythonProcess("deleter", "selfdrive.loggerd.deleter", persistent=True),
-  PythonProcess("dmonitoringd", "selfdrive.monitoring.dmonitoringd", enabled=(not PC or WEBCAM), driverview=True),
+#  PythonProcess("dmonitoringd", "selfdrive.monitoring.dmonitoringd", enabled=(not PC or WEBCAM), driverview=True),
   PythonProcess("logmessaged", "selfdrive.logmessaged", persistent=True),
   PythonProcess("pandad", "selfdrive.pandad", persistent=True),
   PythonProcess("paramsd", "selfdrive.locationd.paramsd"),
@@ -38,7 +38,7 @@ procs = [
   PythonProcess("uploader", "selfdrive.loggerd.uploader", persistent=True),
 
   # EON only
-  PythonProcess("rtshield", "selfdrive.rtshield", enabled=EON),
+#  PythonProcess("rtshield", "selfdrive.rtshield", enabled=EON),
   PythonProcess("androidd", "selfdrive.hardware.eon.androidd", enabled=EON, persistent=True),
 ]
 

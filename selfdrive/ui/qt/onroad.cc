@@ -212,14 +212,16 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   p.drawRoundedRect(rc, 20, 20);
   p.setPen(Qt::NoPen);
 
-  configFont(p, "Open Sans", 48, "Regular");
-  drawText(p, rc.center().x(), 118, "MAX", is_cruise_set ? 200 : 100);
-  if (is_cruise_set) {
-    configFont(p, "Open Sans", 88, is_cruise_set ? "Bold" : "SemiBold");
-    drawText(p, rc.center().x(), 212, maxSpeed, 255);
-  } else {
-    configFont(p, "Open Sans", 80, "SemiBold");
-    drawText(p, rc.center().x(), 212, maxSpeed, 100);
+  if (false) {
+    configFont(p, "Open Sans", 48, "Regular");
+    drawText(p, rc.center().x(), 118, "MAX", is_cruise_set ? 200 : 100);
+    if (is_cruise_set) {
+      configFont(p, "Open Sans", 88, is_cruise_set ? "Bold" : "SemiBold");
+      drawText(p, rc.center().x(), 212, maxSpeed, 255);
+    } else {
+      configFont(p, "Open Sans", 80, "SemiBold");
+      drawText(p, rc.center().x(), 212, maxSpeed, 100);
+    }
   }
 
   // current speed
@@ -235,7 +237,8 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
   }
 
   // dm icon
-  if (!hideDM) {
+  if (false) {
+//  if (!hideDM) {
     drawIcon(p, radius / 2 + (bdr_s * 2), rect().bottom() - footer_h / 2,
              dm_img, QColor(0, 0, 0, 70), dmActive ? 1.0 : 0.2);
   }

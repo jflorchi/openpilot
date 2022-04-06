@@ -24,6 +24,7 @@ class LatTunes(Enum):
   PID_L = 13
   PID_M = 14
   PID_N = 15
+  PID_O = 16
 
 
 ###### LONG ######
@@ -128,6 +129,12 @@ def set_lat_tune(tune, name):
       tune.pid.kpV = [0.35]
       tune.pid.kiV = [0.15]
       tune.pid.kf = 0.00007818594
+    elif name == LatTunes.PID_O:
+      tune.pid.kpBP = [9., 16., 32.]
+      tune.pid.kiBP = [9., 16., 32.]
+      tune.pid.kpV = [0.165, 0.088, 0.053]
+      tune.pid.kiV = [0.041, 0.022, 0.013]
+      tune.pid.kf = 0.00004085
     else:
       raise NotImplementedError('This PID tune does not exist')
   else:
