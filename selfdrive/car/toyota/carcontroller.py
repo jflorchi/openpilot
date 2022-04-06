@@ -3,7 +3,8 @@ from common.numpy_fast import clip, interp
 from selfdrive.car import apply_toyota_steer_torque_limits, create_gas_interceptor_command, make_can_msg
 from selfdrive.car.toyota.toyotacan import create_steer_command, create_ui_command, \
                                            create_accel_command, create_acc_cancel_command, \
-                                           create_fcw_command, create_lta_steer_command
+                                           create_fcw_command, create_lta_steer_command, \
+                                           create_steer_command_2010
 from selfdrive.car.toyota.values import CAR, STATIC_DSU_MSGS, NO_STOP_TIMER_CAR, TSS2_CAR, \
                                         MIN_ACC_SPEED, PEDAL_TRANSITION, CarControllerParams
 from opendbc.can.packer import CANPacker
@@ -24,6 +25,9 @@ class CarController():
              left_line, right_line, lead, left_lane_depart, right_lane_depart):
 
     # *** compute control surfaces ***
+
+    if CS.CP.carFingerprint == CAR.COROLLA_2010:
+      return self.drive_2010(enabled, CS, frame, actuators, pcm_cancel_cmd, hud_alert, left_line, right_line, lead, left_lane_depart, right_lane_depart)
 
     # gas and brake
     if CS.CP.enableGasInterceptor and enabled:
@@ -130,5 +134,25 @@ class CarController():
     for (addr, cars, bus, fr_step, vl) in STATIC_DSU_MSGS:
       if frame % fr_step == 0 and CS.CP.enableDsu and CS.CP.carFingerprint in cars:
         can_sends.append(make_can_msg(addr, vl, bus))
+
+    return can_sends
+
+  def drive_2010(self, enabled, CS, frame, actuators, pcm_cancel_cmd, hud_alert,
+             left_line, right_line, lead, left_lane_depart, right_lane_depart):
+    # *** compute control surfaces ***
+    # steer torque
+    new_steer = int(round(actuators.steer * CarControllerParams.STEER_MAX))
+    apply_steer = apply_toyota_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, CarControllerParams)
+    self.steer_rate_limited = new_steer != apply_steer
+
+    # Cut steering while we're in a known fault state (2s)
+    if not enabled or CS.steer_state in [9, 25]:
+      apply_steer = 0
+      apply_steer_req = 0
+    else:
+      apply_steer_req = 1
+
+    self.last_steer = apply_steer
+    can_sends = [create_steer_command_2010(self.packer, apply_steer, apply_steer_req, frame)]
 
     return can_sends

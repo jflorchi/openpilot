@@ -31,6 +31,7 @@ class CAR:
   CHR = "TOYOTA C-HR 2018"
   CHRH = "TOYOTA C-HR HYBRID 2018"
   COROLLA = "TOYOTA COROLLA 2017"
+  COROLLA_2010 = "TOYOTA COROLLA 2010"
   COROLLA_TSS2 = "TOYOTA COROLLA TSS2 2019"
   # LSS2 Lexus UX Hybrid is same as a TSS2 Corolla Hybrid
   COROLLAH_TSS2 = "TOYOTA COROLLA HYBRID TSS2 2019"
@@ -1598,6 +1599,7 @@ DBC = {
   CAR.RAV4: dbc_dict('toyota_rav4_2017_pt_generated', 'toyota_adas'),
   CAR.PRIUS: dbc_dict('toyota_prius_2017_pt_generated', 'toyota_adas'),
   CAR.COROLLA: dbc_dict('toyota_corolla_2017_pt_generated', 'toyota_adas'),
+  CAR.COROLLA_2010: dbc_dict('toyota_corolla_2010', 'toyota_adas'),
   CAR.LEXUS_RC: dbc_dict('lexus_is_2018_pt_generated', 'toyota_adas'),
   CAR.LEXUS_RX: dbc_dict('lexus_rx_350_2016_pt_generated', 'toyota_adas'),
   CAR.LEXUS_RXH: dbc_dict('lexus_rx_hybrid_2017_pt_generated', 'toyota_adas'),
@@ -1640,7 +1642,7 @@ TSS2_CAR = set([CAR.RAV4_TSS2, CAR.COROLLA_TSS2, CAR.COROLLAH_TSS2, CAR.LEXUS_ES
                 CAR.LEXUS_RX_TSS2, CAR.LEXUS_RXH_TSS2, CAR.HIGHLANDER_TSS2, CAR.HIGHLANDERH_TSS2, CAR.PRIUS_TSS2, CAR.CAMRY_TSS2, CAR.CAMRYH_TSS2,
                 CAR.MIRAI, CAR.LEXUS_NX_TSS2, CAR.ALPHARD_TSS2])
 
-NO_DSU_CAR = TSS2_CAR | set([CAR.CHR, CAR.CHRH, CAR.CAMRY, CAR.CAMRYH])
+NO_DSU_CAR = TSS2_CAR | set([CAR.CHR, CAR.CHRH, CAR.CAMRY, CAR.CAMRYH, CAR.COROLLA_2010])
 
 # no resume button press required
-NO_STOP_TIMER_CAR = TSS2_CAR | set([CAR.RAV4H, CAR.HIGHLANDERH, CAR.HIGHLANDER, CAR.SIENNA, CAR.LEXUS_ESH])
+NO_STOP_TIMER_CAR = TSS2_CAR | set([CAR.RAV4H, CAR.HIGHLANDERH, CAR.HIGHLANDER, CAR.SIENNA, CAR.LEXUS_ESH, CAR.COROLLA_2010])
