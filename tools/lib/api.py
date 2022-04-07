@@ -10,6 +10,7 @@ class CommaApi():
       self.session.headers['Authorization'] = 'JWT ' + token
 
   def request(self, method, endpoint, **kwargs):
+    print('API REQUEST: method(' + method + ') ' + endpoint + " - " + kwargsendpoint + " - " + kwargs)
     resp = self.session.request(method, API_HOST + '/' + endpoint, **kwargs)
     resp_json = resp.json()
     if isinstance(resp_json, dict) and resp_json.get('error'):

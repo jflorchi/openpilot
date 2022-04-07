@@ -25,7 +25,7 @@ class LatTunes(Enum):
   PID_M = 14
   PID_N = 15
   PID_O = 16
-
+  STEER_MODEL_COROLLA = 17
 
 ###### LONG ######
 def set_long_tune(tune, name):
@@ -72,6 +72,16 @@ def set_lat_tune(tune, name):
     tune.lqr.k = [-110.73572306, 451.22718255]
     tune.lqr.l = [0.3233671, 0.3185757]
     tune.lqr.dcGain = 0.002237852961363602
+
+  elif 'STEER_MODEL' in str(name):
+    tune.init('model')
+    tune.model.useRates = False  # TODO: makes model sluggish, see comments in latcontrol_model.py
+    tune.model.multiplier = 1.
+
+    if name == LatTunes.STEER_MODEL_COROLLA:
+      tune.model.name = "corolla_model_v5"
+    else:
+      raise NotImplementedError('This steering model does not exist')
 
   elif 'PID' in str(name):
     tune.init('pid')

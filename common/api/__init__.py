@@ -20,6 +20,7 @@ class Api():
     return self.request('POST', *args, **kwargs)
 
   def request(self, method, endpoint, timeout=None, access_token=None, **params):
+    print("__init__ api requests method(" + method + ") " + endpoint + " - " + params)
     return api_get(endpoint, method=method, timeout=timeout, access_token=access_token, **params)
 
   def get_token(self):

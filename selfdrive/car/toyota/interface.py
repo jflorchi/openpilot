@@ -61,11 +61,12 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam = 88
       stop_and_go = False
       ret.wheelbase = 2.60
-      ret.steerRatio = 18.27
+      ret.steerRatio = 17.4
       tire_stiffness_factor = 0.444  # not optimized yet
       ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG  # mean between normal and hybrid
-      ret.steerActuatorDelay = 0.42
-      set_lat_tune(ret.lateralTuning, LatTunes.PID_O)
+      set_lat_tune(ret.lateralTuning, LatTunes.STEER_MODEL_COROLLA)
+     # ret.steerActuatorDelay = 0.42
+      #set_lat_tune(ret.lateralTuning, LatTunes.PID_O)
       #set_lat_tune(ret.lateralTuning, LatTunes.PID_A)
       #ret.steerLimitTimer = 5.0
 

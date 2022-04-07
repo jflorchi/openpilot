@@ -207,10 +207,12 @@ void OnroadHud::paintEvent(QPaintEvent *event) {
 
   // max speed
   QRect rc(bdr_s * 2, bdr_s * 1.5, 184, 202);
-  p.setPen(QPen(QColor(0xff, 0xff, 0xff, 100), 10));
-  p.setBrush(QColor(0, 0, 0, 100));
-  p.drawRoundedRect(rc, 20, 20);
-  p.setPen(Qt::NoPen);
+  if (false) {
+    p.setPen(QPen(QColor(0xff, 0xff, 0xff, 100), 10));
+    p.setBrush(QColor(0, 0, 0, 100));
+    p.drawRoundedRect(rc, 20, 20);
+    p.setPen(Qt::NoPen);
+  }
 
   if (false) {
     configFont(p, "Open Sans", 48, "Regular");
