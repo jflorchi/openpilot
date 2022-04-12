@@ -60,7 +60,7 @@ void Sidebar::updateState(const UIState &s) {
   QColor tempColor2 = good_color;
   if (amps > 500) {
     tempColor2 = danger_color;
-  } else if (amps > 400) {
+  } else if (amps > 0) {
     tempColor2 = warning_color;
   }
 
