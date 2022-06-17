@@ -31,5 +31,10 @@ def set_lat_tune(tune, name):
         tune.pid.kpV = [0.2]
         tune.pid.kiV = [0.05]
         tune.pid.kf = 0.00003
+    elif name == LatTunes.GLEN_MODEL:
+      tune.init('model')
+      tune.model.useRates = False  # TODO: makes model sluggish, see comments in latcontrol_model.py
+      tune.model.multiplier = 1.
+      tune.model.name = "corolla_model_v5"
     else:
         raise NotImplementedError('This lateral tune does not exist')

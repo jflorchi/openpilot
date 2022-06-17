@@ -3,7 +3,6 @@ from selfdrive.car import crc8_pedal
 
 def create_steer_command(packer, steer, steer_req, raw_cnt):
     """Creates a CAN message for the Toyota Steer Command."""
-
     values = {
         "STEER_REQUEST": steer_req,
         "STEER_TORQUE_CMD": steer,

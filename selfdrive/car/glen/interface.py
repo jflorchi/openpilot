@@ -35,7 +35,7 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 17.4
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.GLEN_PID)
+            set_lat_tune(ret.lateralTuning, LatTunes.GLEN_MODEL)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44

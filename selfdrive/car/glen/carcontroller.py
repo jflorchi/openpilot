@@ -7,7 +7,7 @@ from selfdrive.car.glen.values import MIN_ACC_SPEED, PEDAL_TRANSITION, CarContro
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 
-PEDAL_SCALE = 2.0
+PEDAL_SCALE = 3.0
 
 
 class CarController():
@@ -42,6 +42,8 @@ class CarController():
             apply_steer_req = 0
         else:
             apply_steer_req = 1
+
+        self.last_steer = apply_steer
 
         can_sends = [create_steer_command(self.packer, apply_steer, apply_steer_req, frame)]
 
