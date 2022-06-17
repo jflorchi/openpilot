@@ -96,6 +96,8 @@ class Controls:
 
     self.CI, self.CP = get_car(self.can_sock, self.pm.sock['sendcan'])
 
+    self.disengage_on_accelerator = Params().get_bool("DisengageOnAccelerator")
+
     # read params
     self.is_metric = params.get_bool("IsMetric")
     self.is_ldw_enabled = params.get_bool("IsLdwEnabled")
@@ -194,6 +196,15 @@ class Controls:
     if not self.initialized:
       self.events.add(EventName.controlsInitializing)
       return
+
+    # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
+    if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
+      (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)):
+      self.events.add(EventName.pedalPressed)
+
+    if CS.gasPressed:
+      self.events.add(EventName.pedalPressedPreEnable if self.disengage_on_accelerator else
+                      EventName.gasPressedOverride)
 
     self.events.add_from_msg(CS.events)
     self.events.add_from_msg(self.sm['driverMonitoringState'].events)
