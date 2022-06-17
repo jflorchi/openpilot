@@ -21,9 +21,11 @@ class CAR:
     GLEN = "GLEN"
 
 
-STATIC_DSU_MSGS: list = []
+STATIC_DSU_MSGS = []
 
-FW_VERSIONS: list = []
+FW_VERSIONS = {
+  CAR.GLEN: {}
+}
 
 STEER_THRESHOLD = 100
 
