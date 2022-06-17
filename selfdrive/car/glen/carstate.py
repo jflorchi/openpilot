@@ -8,7 +8,7 @@ from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from selfdrive.car.glen.linked_ring import LinkedRing
 from selfdrive.car.interfaces import CarStateBase
-from selfdrive.car.toyota.values import DBC, STEER_THRESHOLD, EPS_SCALE
+from selfdrive.car.glen.values import DBC, STEER_THRESHOLD, EPS_SCALE
 from selfdrive.config import Conversions as CV
 
 
@@ -96,7 +96,7 @@ class CarState(CarStateBase):
         vehicle_cruise = bool(cp0.vl["PCM_CRUISE_SM"]["CRUISE_CONTROL_STATE"] != 0)
         stalk_cruise = bool(cp2.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
         ret.cruiseState.enabled = vehicle_cruise or stalk_cruise
-        ret.cruiseState.nonAdaptive = cp0.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)
+        ret.cruiseState.nonAdaptive = cp2.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)
         ret.genericToggle = True
         ret.stockAeb = False
 
@@ -128,7 +128,12 @@ class CarState(CarStateBase):
             ("STEER_ANGLE_INITIALIZING", "STEER_TORQUE_SENSOR"),
             ("LKA_STATE", "EPS_STATUS"),
             ("AUTO_HIGH_BEAM", "LIGHT_STALK"),
-            ("GAS_PEDAL", "GAS_PEDAL")
+            ("GAS_PEDAL", "GAS_PEDAL"),
+            ("WHEEL_SPEED_FL", "WHEEL_SPEEDS_FRONT"),
+            ("WHEEL_SPEED_FR", "WHEEL_SPEEDS_FRONT"),
+            ("WHEEL_SPEED_RL", "WHEEL_SPEEDS_REAR"),
+            ("WHEEL_SPEED_RR", "WHEEL_SPEEDS_REAR"),
+            ("CRUISE_CONTROL_STATE", "PCM_CRUISE_SM")
         ]
         checks = [
             ("GEAR_PACKET", 1),
@@ -137,8 +142,11 @@ class CarState(CarStateBase):
             ("ESP_CONTROL", 3),
             ("EPS_STATUS", 25),
             ("GAS_PEDAL", 33),
+            ("PCM_CRUISE_SM", 4),
             ("BRAKE_MODULE", 40),
             ("STEER_ANGLE_SENSOR", 80),
+            ("WHEEL_SPEEDS_FRONT", 80),
+            ("WHEEL_SPEEDS_REAR", 80),
             ("STEER_TORQUE_SENSOR", 50)
         ]
         return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, 0)
