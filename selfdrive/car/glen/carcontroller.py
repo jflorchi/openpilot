@@ -1,7 +1,7 @@
 from cereal import car
 from common.numpy_fast import clip, interp
 from opendbc.can.packer import CANPacker
-from selfdrive.car import apply_toyota_steer_torque_limits
+from selfdrive.car import apply_toyota_steer_torque_limits, make_can_msg
 from selfdrive.car.glen.glencan import create_steer_command, create_gas_interceptor_command
 from selfdrive.car.glen.values import MIN_ACC_SPEED, PEDAL_TRANSITION, CarControllerParams
 
@@ -18,6 +18,7 @@ class CarController():
         self.packer = CANPacker(dbc_name)
         self.gas = 0
         self.accel = 0
+        self.last_enabled = False
 
     def update(self, enabled, active, CS, frame, actuators, pcm_cancel_cmd, hud_alert,
                left_line, right_line, lead, left_lane_depart, right_lane_depart):
@@ -56,9 +57,14 @@ class CarController():
             can_sends.append(create_gas_interceptor_command(self.packer, interceptor_gas_cmd, frame // 2))
             self.gas = interceptor_gas_cmd
 
+        if self.last_enabled and not enabled: # openpilot was disabled during this loop send messaged
+          can_sends.append(make_can_msg(0x002, b'\xFF', 2))
+
         new_actuators = actuators.copy()
         new_actuators.steer = apply_steer / CarControllerParams.STEER_MAX
         new_actuators.accel = self.accel
         new_actuators.gas = self.gas
+
+        self.last_enabled = enabled
 
         return new_actuators, can_sends
