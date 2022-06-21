@@ -7,8 +7,6 @@ from selfdrive.car.glen.values import MIN_ACC_SPEED, PEDAL_TRANSITION, CarContro
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
 
-PEDAL_SCALE = 3.0
-
 
 class CarController():
     def __init__(self, dbc_name, CP, VM):
@@ -27,7 +25,8 @@ class CarController():
         if CS.CP.enableGasInterceptor and active:
             MAX_INTERCEPTOR_GAS = 0.5
             pedal_offset = interp(CS.out.vEgo, [0.0, 2.3, MIN_ACC_SPEED + PEDAL_TRANSITION], [-.4, 0.0, 0.2])
-            pedal_command = ((actuators.accel / PEDAL_SCALE) + pedal_offset)
+            PEDAL_SCALE = interp(CS.out.vEgo, [0.0, 34.0], [0.15, 0.3, 0.0])
+            pedal_command = ((actuators.accel * PEDAL_SCALE) + pedal_offset)
             interceptor_gas_cmd = clip(pedal_command, 0., MAX_INTERCEPTOR_GAS)
         else:
             interceptor_gas_cmd = 0.

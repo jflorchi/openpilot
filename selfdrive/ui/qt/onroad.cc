@@ -182,10 +182,10 @@ void OnroadHud::updateState(const UIState &s) {
 
   float maxspeed = cs.getVCruise();
   bool cruise_set = maxspeed > 0 && (int)maxspeed != SET_SPEED_NA;
-  if (!s.scene.is_metric) {
+  if (cruise_set && !s.scene.is_metric) {
     maxspeed *= KM_TO_MILE;
   }
-  QString maxspeed_str = QString::number(std::nearbyint(maxspeed));
+  QString maxspeed_str = cruise_set ? QString::number(std::nearbyint(maxspeed)) : "N/A";
   float cur_speed = std::max(0.0, sm["carState"].getCarState().getVEgo() * (s.scene.is_metric ? MS_TO_KPH : MS_TO_MPH));
 
   setProperty("is_cruise_set", cruise_set);
