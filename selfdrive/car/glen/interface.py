@@ -26,7 +26,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
+        ret.steerActuatorDelay = 0.28  # Default delay, Prius has larger delay
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 

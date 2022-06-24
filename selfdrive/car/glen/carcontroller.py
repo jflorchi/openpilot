@@ -24,9 +24,8 @@ class CarController():
         # gas and brake
         if CS.CP.enableGasInterceptor and active:
             MAX_INTERCEPTOR_GAS = 0.5
-            pedal_offset = interp(CS.out.vEgo, [0.0, 2.3, MIN_ACC_SPEED + PEDAL_TRANSITION], [-.4, 0.0, 0.2])
             PEDAL_SCALE = interp(CS.out.vEgo, [0.0, 34.0], [0.15, 0.3, 0.0])
-            pedal_command = ((actuators.accel * PEDAL_SCALE) + pedal_offset)
+            pedal_command = (actuators.accel * PEDAL_SCALE)
             interceptor_gas_cmd = clip(pedal_command, 0., MAX_INTERCEPTOR_GAS)
         else:
             interceptor_gas_cmd = 0.

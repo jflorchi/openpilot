@@ -33,4 +33,4 @@ DBC = {
     CAR.GLEN: dbc_dict('toyota_corolla_2010', None)
 }
 
-EPS_SCALE = 73
+EPS_SCALE = 88

@@ -76,6 +76,7 @@ class CarState(CarStateBase):
             ret.steeringRateDeg = cur_angle
             self.last_time = cur_time
         self.last_angle = ret.steeringAngleDeg
+        ret.steeringAngleDeg -= 0.64
 
         can_gear = int(cp0.vl["GEAR_PACKET"]["GEAR"])
         ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
@@ -142,11 +143,11 @@ class CarState(CarStateBase):
             ("ESP_CONTROL", 3),
             ("EPS_STATUS", 25),
             ("GAS_PEDAL", 33),
-            ("PCM_CRUISE_SM", 4),
+            ("PCM_CRUISE_SM", 2),
             ("BRAKE_MODULE", 40),
             ("STEER_ANGLE_SENSOR", 80),
-            ("WHEEL_SPEEDS_FRONT", 80),
-            ("WHEEL_SPEEDS_REAR", 80),
+            ("WHEEL_SPEEDS_FRONT", 50),
+            ("WHEEL_SPEEDS_REAR", 50),
             ("STEER_TORQUE_SENSOR", 50)
         ]
         return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, 0)
@@ -183,6 +184,6 @@ class CarState(CarStateBase):
             ("PCM_CRUISE_2", 4),
             ("BLINKERS_STATE", 4),
             ("SECONDARY_STEER_ANGLE", 20),
-            ("GAS_SENSOR", 50)
+            ("GAS_SENSOR", 40)
         ]
         return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, 2)
