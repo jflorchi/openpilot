@@ -39,12 +39,10 @@ static void locationCallback(GpsLocation* location) {
   float vel_n = (dlat * 110574) / elapsed;
   float vel_e = (dlong * 111320 * cos(rdlat)) / elapsed;
   float f[] = { vel_n, vel_e, location->speed };
-  LOGW("IDK %lf", sqrt(vel_n*vel_n + vel_e*vel_e));
-  LOGW("VEL %lf %lf %lf", vel_n, vel_e, location->speed);
   gpsLoc.setVNED(f);
-  gpsLoc.setVerticalAccuracy(10 * 1e-03);
-  gpsLoc.setSpeedAccuracy(10 * 1e-03);
-  gpsLoc.setBearingAccuracyDeg(10 * 1e-03);
+  gpsLoc.setVerticalAccuracy(location->accuracy);
+  gpsLoc.setSpeedAccuracy(location->accuracy);
+  gpsLoc.setBearingAccuracyDeg(location->accuracy);
 
   lastLat = location->latitude;
   lastLong = location->longitude;
@@ -128,6 +126,8 @@ int main(int argc, char *argv[]) {
     gGpsInterface->start();
     gGpsInterface->set_position_mode(GPS_POSITION_MODE_MS_BASED, GPS_POSITION_RECURRENCE_PERIODIC, 1000, 0, 0);
   }
-  sleep(1000000000);
+  while (true) {
+    sleep(500);
+  }
   return 0;
 }
