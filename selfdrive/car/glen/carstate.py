@@ -76,7 +76,7 @@ class CarState(CarStateBase):
             ret.steeringRateDeg = cur_angle
             self.last_time = cur_time
         self.last_angle = ret.steeringAngleDeg
-        #ret.steeringAngleDeg -= -5.0
+        ret.steeringAngleDeg -= 2.41
 
         #print(ret.steeringAngleDeg)
 
