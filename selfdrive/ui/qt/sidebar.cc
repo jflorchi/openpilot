@@ -63,14 +63,14 @@ void Sidebar::updateState(const UIState &s) {
   }
   setProperty("connectStatus", QVariant::fromValue(connectStatus));
 
-  ItemStatus tempStatus = {"TEMP\nHIGH", danger_color};
   auto ts = deviceState.getThermalStatus();
+  QColor temp_color = danger_color;
   if (ts == cereal::DeviceState::ThermalStatus::GREEN) {
-    tempStatus = {"TEMP\nGOOD", good_color};
+    temp_color = good_color;
   } else if (ts == cereal::DeviceState::ThermalStatus::YELLOW) {
-    tempStatus = {"TEMP\nOK", warning_color};
+    temp_color = warning_color;
   }
-  setProperty("tempStatus", QVariant::fromValue(tempStatus));
+  setProperty("tempStatus", QVariant::fromValue(ItemStatus{"TEMP\n" + QString("%1°C").arg((int)deviceState.getAmbientTempC()), temp_color}));
 
   ItemStatus pandaStatus = {"VEHICLE\nONLINE", good_color};
   if (s.scene.pandaType == cereal::PandaState::PandaType::UNKNOWN) {
