@@ -35,8 +35,9 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 18.27 # 13.9 # 18.27 # 17.4 #16.3 # 18.27 # 17.4
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
+            set_lat_tune(ret.lateralTuning, LatTunes.STEER_MODEL_COROLLA)
             #set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=2.8, FRICTION=0.024, steering_angle_deadzone_deg=0.0)
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=1.8, FRICTION=0.016, steering_angle_deadzone_deg=0.0)
+            #set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=1.8, FRICTION=0.016, steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44

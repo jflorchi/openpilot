@@ -25,6 +25,7 @@ class LatTunes(Enum):
   PID_M = 14
   PID_N = 15
   TORQUE = 16
+  STEER_MODEL_COROLLA = 17
 
 
 ###### LONG ######
@@ -53,6 +54,11 @@ def set_long_tune(tune, name):
 def set_lat_tune(tune, name, MAX_LAT_ACCEL=2.5, FRICTION=.1, steering_angle_deadzone_deg=0.0, use_steering_angle=True):
   if name == LatTunes.TORQUE:
     set_torque_tune(tune, MAX_LAT_ACCEL, FRICTION, steering_angle_deadzone_deg)
+  elif name == LatTunes.STEER_MODEL_COROLLA:
+    tune.init('model')
+    tune.model.useRates = False  # TODO: makes model sluggish, see comments in latcontrol_model.py
+    tune.model.multiplier = 1.
+    tune.model.name = "corolla_model_v5"
   elif 'PID' in str(name):
     tune.init('pid')
     tune.pid.kiBP = [0.0]
