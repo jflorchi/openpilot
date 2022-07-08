@@ -1,7 +1,6 @@
 import math
 import numpy as np
 from common.basedir import BASEDIR
-from selfdrive.controls.lib.drive_helpers import get_steer_max
 from cereal import log
 from common.numpy_fast import clip, interp
 from common.realtime import DT_CTRL
@@ -9,7 +8,7 @@ from common.realtime import DT_CTRL
 
 class LatControlModel:
   def __init__(self, CP, CI):
-    super().__init__(CP, CI)
+    self.CP = CP
     # Model generated using Konverter: https://github.com/sshane/Konverter
     model_weights_file = f'{BASEDIR}/models/steering/{CP.lateralTuning.model.name}_weights.npz'
     self.w, self.b = np.load(model_weights_file, allow_pickle=True)['wb']
@@ -44,7 +43,7 @@ class LatControlModel:
     l2 = np.dot(l1, self.w[2]) + self.b[2]
     return l2
 
-  def update(self, active, CS, CP, VM, params, last_actuators, desired_curvature, desired_curvature_rate):
+  def update(self, active, CS, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk):
     model_log = log.ControlsState.LateralModelState.new_message()
     model_log.steeringAngleDeg = float(CS.steeringAngleDeg)
     model_log.useRates = self.use_rates
@@ -56,7 +55,7 @@ class LatControlModel:
       output_steer = 0.0
       model_log.active = False
     else:
-      steers_max = get_steer_max(CP, CS.vEgo)
+      steers_max = 1.0
       pos_limit = steers_max
       neg_limit = -steers_max
 
@@ -71,7 +70,7 @@ class LatControlModel:
 
       output_steer = self.predict(model_input)[0]
       output_steer = clip(output_steer, neg_limit, pos_limit)
-      output_steer = float(output_steer * CP.lateralTuning.model.multiplier)
+      output_steer = float(output_steer * self.CP.lateralTuning.model.multiplier)
 
       if output_steer < 0:  # model doesn't like right curves
         _90_degree_bp = interp(CS.vEgo, [17.8816, 31.2928], [1., 1.1])  # 40 to 70 mph, 90 degree brakepoint
