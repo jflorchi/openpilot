@@ -5,7 +5,7 @@ from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness,
 from selfdrive.car.glen.tunes import LatTunes, LongTunes, set_long_tune, set_lat_tune
 from selfdrive.car.glen.values import CAR, EPS_SCALE, CarControllerParams
 from selfdrive.car.interfaces import CarInterfaceBase
-from selfdrive.config import Conversions as CV
+from common.conversions import Conversions as CV
 
 EventName = car.CarEvent.EventName
 
@@ -16,7 +16,7 @@ class CarInterface(CarInterfaceBase):
         return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
 
     @staticmethod
-    def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None):
+    def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None, disable_radar=True):
         tire_stiffness_factor = 0.444
         if car_fw is None:
             car_fw = []
@@ -32,10 +32,10 @@ class CarInterface(CarInterfaceBase):
 
         if candidate == CAR.GLEN:
             ret.wheelbase = 2.6
-            ret.steerRatio = 17.4
+            ret.steerRatio = 18.27 # 17.4
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.GLEN_MODEL)
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=2.8, FRICTION=0.024)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
@@ -51,7 +51,7 @@ class CarInterface(CarInterfaceBase):
         ret.openpilotLongitudinalControl = True
         ret.minEnableSpeed = -1.
 
-        set_long_tune(ret.longitudinalTuning, LongTunes.GLEN_PEDAL)
+        set_long_tune(ret.longitudinalTuning, LongTunes.PEDAL)
 
         return ret
 

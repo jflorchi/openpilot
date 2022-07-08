@@ -9,8 +9,7 @@ from opendbc.can.parser import CANParser
 from selfdrive.car.glen.linked_ring import LinkedRing
 from selfdrive.car.interfaces import CarStateBase
 from selfdrive.car.glen.values import DBC, STEER_THRESHOLD, EPS_SCALE
-from selfdrive.config import Conversions as CV
-
+from common.conversions import Conversions as CV
 
 class CarState(CarStateBase):
     def __init__(self, CP):
