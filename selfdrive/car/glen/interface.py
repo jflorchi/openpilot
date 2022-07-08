@@ -26,16 +26,17 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        ret.steerActuatorDelay =0.12# 0.28  # Default delay, Prius has larger delay
+        ret.steerActuatorDelay = 0.12 # 0.28  # Default delay, Prius has larger delay
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
         if candidate == CAR.GLEN:
             ret.wheelbase = 2.6
-            ret.steerRatio = 18.27 # 17.4
+            ret.steerRatio = 18.27 # 13.9 # 18.27 # 17.4 #16.3 # 18.27 # 17.4
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=2.8, FRICTION=0.024)
+            #set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=2.8, FRICTION=0.024, steering_angle_deadzone_deg=0.0)
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.1, FRICTION=0.12, steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
@@ -57,13 +58,8 @@ class CarInterface(CarInterfaceBase):
 
     # returns a car.CarState
     def _update(self, c):
-        #self.cp.update_strings(can_strings)
-        #self.cp_cam.update_strings(can_strings)
-        #self.cp_body.update_strings(can_strings)
-
         ret = self.CS.update(self.cp, self.cp_cam, self.cp_body)
 
-        #ret.canValid = self.cp.can_valid and self.cp_cam.can_valid and self.cp_body.can_valid
         ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
 
         # events
@@ -82,8 +78,6 @@ class CarInterface(CarInterfaceBase):
 
         ret.events = events.to_msg()
 
-        #self.CS.out = ret.as_reader()
-        #return self.CS.out
         return ret
 
     # pass in a car.CarControl

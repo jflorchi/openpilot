@@ -312,26 +312,26 @@ class Controls:
       self.events.add(EventName.usbError)
 
     # generic catch-all. ideally, a more specific event should be added above instead
-    no_system_errors = len(self.events) != num_events
-    if (not self.sm.all_checks() or self.can_rcv_error) and no_system_errors and CS.canValid and not CS.canTimeout:
-      if not self.sm.all_alive():
-        self.events.add(EventName.commIssue)
-      elif not self.sm.all_freq_ok():
-        self.events.add(EventName.commIssueAvgFreq)
-      else: # invalid or can_rcv_error.
-        self.events.add(EventName.commIssue)
-
-      logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
-        'can_error': self.can_rcv_error,
-      }
-      if logs != self.logged_comm_issue:
-        cloudlog.event("commIssue", error=True, **logs)
-        self.logged_comm_issue = logs
-    else:
-      self.logged_comm_issue = None
+#    no_system_errors = len(self.events) != num_events
+#    if (not self.sm.all_checks() or self.can_rcv_error) and no_system_errors and CS.canValid and not CS.canTimeout:
+#      if not self.sm.all_alive():
+#        self.events.add(EventName.commIssue)
+#      elif not self.sm.all_freq_ok():
+#        self.events.add(EventName.commIssueAvgFreq)
+#      else: # invalid or can_rcv_error.
+#        self.events.add(EventName.commIssue)
+#
+#      logs = {
+#        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
+#        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
+#        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+#        'can_error': self.can_rcv_error,
+#      }
+#      if logs != self.logged_comm_issue:
+#        cloudlog.event("commIssue", error=True, **logs)
+#        self.logged_comm_issue = logs
+#    else:
+#      self.logged_comm_issue = None
 
     if not self.sm['liveParameters'].valid:
       self.events.add(EventName.vehicleModelInvalid)
