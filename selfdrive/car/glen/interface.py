@@ -26,7 +26,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        ret.steerActuatorDelay = 0.28  # Default delay, Prius has larger delay
+        ret.steerActuatorDelay =0.12# 0.28  # Default delay, Prius has larger delay
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
@@ -56,15 +56,14 @@ class CarInterface(CarInterfaceBase):
         return ret
 
     # returns a car.CarState
-    def update(self, c, can_strings):
-        # ******************* do can recv *******************
-        self.cp.update_strings(can_strings)
-        self.cp_cam.update_strings(can_strings)
-        self.cp_body.update_strings(can_strings)
+    def _update(self, c):
+        #self.cp.update_strings(can_strings)
+        #self.cp_cam.update_strings(can_strings)
+        #self.cp_body.update_strings(can_strings)
 
         ret = self.CS.update(self.cp, self.cp_cam, self.cp_body)
 
-        ret.canValid = self.cp.can_valid and self.cp_cam.can_valid and self.cp_body.can_valid
+        #ret.canValid = self.cp.can_valid and self.cp_cam.can_valid and self.cp_body.can_valid
         ret.steeringRateLimited = self.CC.steer_rate_limited if self.CC is not None else False
 
         # events
@@ -83,18 +82,12 @@ class CarInterface(CarInterfaceBase):
 
         ret.events = events.to_msg()
 
-        self.CS.out = ret.as_reader()
-        return self.CS.out
+        #self.CS.out = ret.as_reader()
+        #return self.CS.out
+        return ret
 
     # pass in a car.CarControl
     # to be called @ 100hz
     def apply(self, c):
-        hud_control = c.hudControl
-        ret = self.CC.update(c.enabled, c.active, self.CS, self.frame,
-                             c.actuators, c.cruiseControl.cancel,
-                             hud_control.visualAlert, hud_control.leftLaneVisible,
-                             hud_control.rightLaneVisible, hud_control.leadVisible,
-                             hud_control.leftLaneDepart, hud_control.rightLaneDepart)
-
-        self.frame += 1
+        ret = self.CC.update(c, self.CS)
         return ret

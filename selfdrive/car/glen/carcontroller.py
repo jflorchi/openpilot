@@ -10,6 +10,9 @@ VisualAlert = car.CarControl.HUDControl.VisualAlert
 
 class CarController():
     def __init__(self, dbc_name, CP, VM):
+        self.CP = CP
+        self.frame = 0
+        self.torque_rate_limits = CarControllerParams(self.CP)
         self.steer_rate_limited = False
         self.last_steer = 0
 
@@ -18,11 +21,13 @@ class CarController():
         self.accel = 0
         self.last_enabled = False
 
-    def update(self, enabled, active, CS, frame, actuators, pcm_cancel_cmd, hud_alert,
-               left_line, right_line, lead, left_lane_depart, right_lane_depart):
+    def update(self, CC, CS):
+        actuators = CC.actuators
+        hud_control = CC.hudControl
+        pcm_cancel_cmd = CC.cruiseControl.cancel
 
         # gas and brake
-        if CS.CP.enableGasInterceptor and active:
+        if self.CP.enableGasInterceptor and CC.longActive:
             MAX_INTERCEPTOR_GAS = 0.5
             PEDAL_SCALE = interp(CS.out.vEgo, [0.0, 40.0], [0.15, 0.45, 0.0])
             pedal_command = (actuators.accel * PEDAL_SCALE)
@@ -32,11 +37,10 @@ class CarController():
         pcm_accel_cmd = clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)
 
         new_steer = int(round(actuators.steer * CarControllerParams.STEER_MAX))
-        apply_steer = apply_toyota_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps,
-                                                       CarControllerParams)
+        apply_steer = apply_toyota_steer_torque_limits(new_steer, self.last_steer, CS.out.steeringTorqueEps, self.torque_rate_limits)
         self.steer_rate_limited = new_steer != apply_steer
 
-        if not active or CS.steer_state in (9, 25):
+        if not CC.latActive:
             apply_steer = 0
             apply_steer_req = 0
         else:
@@ -44,18 +48,18 @@ class CarController():
 
         self.last_steer = apply_steer
 
-        can_sends = [create_steer_command(self.packer, apply_steer, apply_steer_req, frame)]
+        can_sends = [create_steer_command(self.packer, apply_steer, apply_steer_req, self.frame)]
 
-        if (frame % 3 == 0 and CS.CP.openpilotLongitudinalControl) or pcm_cancel_cmd:
-            lead = lead or CS.out.vEgo < 12.  # at low speed we always assume the lead is present so ACC can be engaged
-            if CS.CP.openpilotLongitudinalControl:
+        if (self.frame % 3 == 0 and self.CP.openpilotLongitudinalControl) or pcm_cancel_cmd:
+            lead = hud_control.leadVisible or CS.out.vEgo < 12.  # at low speed we always assume the lead is present so ACC can be engaged
+            if self.CP.openpilotLongitudinalControl:
                 self.accel = pcm_accel_cmd
 
-        if frame % 2 == 0 and CS.CP.enableGasInterceptor and CS.CP.openpilotLongitudinalControl:
-            can_sends.append(create_gas_interceptor_command(self.packer, interceptor_gas_cmd, frame // 2))
+        if self.frame % 2 == 0 and self.CP.enableGasInterceptor and CS.CP.openpilotLongitudinalControl:
+            can_sends.append(create_gas_interceptor_command(self.packer, interceptor_gas_cmd, self.frame // 2))
             self.gas = interceptor_gas_cmd
 
-        if self.last_enabled and not enabled: # openpilot was disabled during this loop send messaged
+        if self.last_enabled and not CC.enabled: # openpilot was disabled during this loop send messaged
           can_sends.append(make_can_msg(0x002, b'\xFF', 2))
 
         new_actuators = actuators.copy()
@@ -63,6 +67,7 @@ class CarController():
         new_actuators.accel = self.accel
         new_actuators.gas = self.gas
 
-        self.last_enabled = enabled
+        self.last_enabled = CC.enabled
 
+        self.frame += 1
         return new_actuators, can_sends

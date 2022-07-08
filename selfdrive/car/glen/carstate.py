@@ -88,7 +88,11 @@ class CarState(CarStateBase):
         ret.steeringTorqueEps = cp0.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_EPS"] * self.eps_torque_scale
         # we could use the override bit from dbc, but it's triggered at too high torque values
         ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD
-        ret.steerWarning = cp0.vl["EPS_STATUS"]["LKA_STATE"] not in (1, 5)
+        ret.steerFaultTemporary = cp0.vl["EPS_STATUS"]["LKA_STATE"] in (0, 9, 21, 25)
+        # 17 is a fault from a prolonged high torque delta between cmd and user
+        ret.steerFaultPermanent = cp0.vl["EPS_STATUS"]["LKA_STATE"] == 17
+
+        #print(str(ret.steerFaultTemporary) + " - " + str(ret.steerFaultPermanent))
 
         ret.cruiseState.available = cp2.vl["PCM_CRUISE_2"]["MAIN_ON"] != 0
         ret.cruiseState.speed = cp2.vl["PCM_CRUISE_2"]["SET_SPEED"] * CV.KPH_TO_MS
