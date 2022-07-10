@@ -42,11 +42,7 @@ class LatControlTorque(LatControl):
     self.use_steering_angle = CP.lateralTuning.torque.useSteeringAngle
     self.friction = CP.lateralTuning.torque.friction
     self.kf = CP.lateralTuning.torque.kf
-
-  #def reset(self):
     self.steering_angle_deadzone_deg = CP.lateralTuning.torque.steeringAngleDeadzoneDeg
-    #super().reset()
-    #self.pid.reset()
 
   def update(self, active, CS, VM, params, last_actuators, desired_curvature, desired_curvature_rate, llk):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
