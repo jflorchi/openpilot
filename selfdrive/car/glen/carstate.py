@@ -101,7 +101,7 @@ class CarState(CarStateBase):
         ret.cruiseState.standstill = False
         vehicle_cruise = bool(cp0.vl["PCM_CRUISE_SM"]["CRUISE_CONTROL_STATE"] != 0)
         stalk_cruise = bool(cp2.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
-        ret.cruiseState.enabled = vehicle_cruise or stalk_cruise
+        ret.cruiseState.enabled = stalk_cruise
         ret.cruiseState.nonAdaptive = cp2.vl["PCM_CRUISE"]["CRUISE_STATE"] in (1, 2, 3, 4, 5, 6)
         ret.genericToggle = True
         ret.stockAeb = False

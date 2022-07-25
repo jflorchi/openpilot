@@ -49,7 +49,7 @@ class LatControlModel:
     model_log.useRates = self.use_rates
 
     angle_steers_des_no_offset = math.degrees(VM.get_steer_from_curvature(-desired_curvature, CS.vEgo, params.roll))
-    angle_steers_des = angle_steers_des_no_offset + params.angleOffsetDeg
+    angle_steers_des = angle_steers_des_no_offset + params.angleOffsetDeg - 0.6
 
     if CS.vEgo < 0.15 or not active:
       output_steer = 0.0

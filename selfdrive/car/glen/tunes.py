@@ -26,6 +26,7 @@ class LatTunes(Enum):
   PID_N = 15
   TORQUE = 16
   STEER_MODEL_COROLLA = 17
+  INDI_BIRD = 18
 
 
 ###### LONG ######
@@ -57,15 +58,25 @@ def set_lat_tune(tune, name, MAX_LAT_ACCEL=2.5, FRICTION=.1, steering_angle_dead
   elif name == LatTunes.STEER_MODEL_COROLLA:
     tune.init('model')
     tune.model.useRates = False  # TODO: makes model sluggish, see comments in latcontrol_model.py
-    tune.model.multiplier = 1.
+    tune.model.multiplier = 0.85 #1.
     tune.model.name = "corolla_model_v5"
+  elif name == LatTunes.INDI_BIRD:
+    tune.init('indi')
+    tune.indi.innerLoopGainBP = [18, 22, 26]
+    tune.indi.innerLoopGainV = [9, 12, 15]
+    tune.indi.outerLoopGainBP = [18, 22, 26]
+    tune.indi.outerLoopGainV = [8, 11, 14.99]
+    tune.indi.timeConstantBP = [18, 22, 26]
+    tune.indi.timeConstantV = [1, 3, 4.5]
+    tune.indi.actuatorEffectivenessBP = [18, 22, 26]
+    tune.indi.actuatorEffectivenessV = [9, 12, 15]
   elif 'PID' in str(name):
     tune.init('pid')
     tune.pid.kiBP = [0.0]
     tune.pid.kpBP = [0.0]
     if name == LatTunes.PID_A:
-      tune.pid.kpV = [0.2]
-      tune.pid.kiV = [0.05]
+      tune.pid.kpV = [0.05]
+      tune.pid.kiV = [0.04]
       tune.pid.kf = 0.00003
     elif name == LatTunes.PID_C:
       tune.pid.kpV = [0.6]
