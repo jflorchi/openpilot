@@ -23,6 +23,8 @@ def deleter_thread(exit_event):
       for delete_dir in dirs:
         delete_path = os.path.join(ROOT, delete_dir)
 
+        if os.path.isfile(delete_path):
+          continue
         if any(name.endswith(".lock") for name in os.listdir(delete_path)):
           continue
 
