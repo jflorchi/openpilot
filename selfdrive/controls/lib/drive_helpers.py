@@ -103,12 +103,12 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates):
     curvature_rates = [0.0]*CONTROL_N
 
   # TODO this needs more thought, use .2s extra for now to estimate other delays
-  #delay = CP.steerActuatorDelay + .2
-  delay = 0.5
-  with open("/data/tune") as file:
-    lines = file.readlines()
-    lines = [line.rstrip() for line in lines]
-    delay = float(lines[2]) + 0.2
+  delay = CP.steerActuatorDelay + .2
+  #delay = 0.5
+  #with open("/data/tune") as file:
+  #  lines = file.readlines()
+  #  lines = [line.rstrip() for line in lines]
+  #  delay = float(lines[2]) + 0.2
 
   current_curvature = curvatures[0]
   psi = interp(delay, T_IDXS[:CONTROL_N], psis)

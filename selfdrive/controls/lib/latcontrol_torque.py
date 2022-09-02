@@ -99,25 +99,25 @@ class LatControlTorque(LatControl):
       pid_log.actualLateralAccel = actual_lateral_accel
       pid_log.desiredLateralAccel = desired_lateral_accel
 
-    self.counter += 1
-    if self.counter >= 100:
-      self.counter = 0
-      max_lat = 0
-      fric = 0
-      with open("/data/tune") as file:
-        lines = file.readlines()
-        lines = [line.rstrip() for line in lines]
-        max_lat = float(lines[0])
-        fric = float(lines[1])
-      if self.last_one != max_lat or self.last_two != fric:
-        print("setting max_lat to " + str(max_lat) + " and setting friciton to " + str(fric))
-        set_torque_tune(self.tune, max_lat, fric)
-        self.pid = PIDController(self.tune.torque.kp, self.tune.torque.ki,
-                            k_f=self.tune.torque.kf, pos_limit=self.steer_max, neg_limit=-self.steer_max)
-        self.friction = self.tune.torque.friction
-        self.kf = self.tune.torque.kf
-        self.last_one = max_lat
-        self.last_two = fric
+#    self.counter += 1
+#    if self.counter >= 100:
+#      self.counter = 0
+#      max_lat = 0
+#      fric = 0
+#      with open("/data/tune") as file:
+#        lines = file.readlines()
+#        lines = [line.rstrip() for line in lines]
+#        max_lat = float(lines[0])
+#        fric = float(lines[1])
+#      if self.last_one != max_lat or self.last_two != fric:
+#        print("setting max_lat to " + str(max_lat) + " and setting friciton to " + str(fric))
+#        set_torque_tune(self.tune, max_lat, fric)
+#        self.pid = PIDController(self.tune.torque.kp, self.tune.torque.ki,
+#                            k_f=self.tune.torque.kf, pos_limit=self.steer_max, neg_limit=-self.steer_max)
+#        self.friction = self.tune.torque.friction
+#        self.kf = self.tune.torque.kf
+#        self.last_one = max_lat
+#        self.last_two = fric
 
     # TODO left is positive in this convention
     return -output_torque, 0.0, pid_log

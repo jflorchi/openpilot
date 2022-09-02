@@ -27,7 +27,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        ret.steerActuatorDelay = 0.28 # -0.1473 # 0.12 # -0.19 # 0.12 # 0.28 # 0.32#85 # 0.4 # 0.3285 # Default delay, Prius has larger delay
+        ret.steerActuatorDelay = 0.3875
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
@@ -36,10 +36,7 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 18.27
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            #set_lat_tune(ret.lateralTuning, LatTunes.PID_A)
-            #set_lat_tune(ret.lateralTuning, LatTunes.STEER_MODEL_COROLLA)
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=2.8, FRICTION=0.0025, steering_angle_deadzone_deg=0.0)
-            #set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=1.8438, FRICTION=0.12289685 / 5.0, steering_angle_deadzone_deg=0.0)
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.032, steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
