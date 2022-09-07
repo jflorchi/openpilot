@@ -28,7 +28,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
         ret.steerActuatorDelay = 0.3875
-        ret.steerLimitTimer = 0.4
+        ret.steerLimitTimer = 1.0
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
         if candidate == CAR.GLEN:
@@ -36,7 +36,7 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 18.27
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.024, steering_angle_deadzone_deg=0.0)
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.032, steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
