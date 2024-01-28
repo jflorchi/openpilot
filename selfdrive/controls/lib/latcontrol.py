@@ -29,3 +29,12 @@ class LatControl(ABC):
       self.sat_count -= self.sat_count_rate
     self.sat_count = clip(self.sat_count, 0.0, self.sat_limit)
     return self.sat_count > (self.sat_limit - 1e-3)
+
+  def _check_saturation_2(self, saturated, CS, steer_limited):
+    if saturated and CS.vEgo > 10. and not steer_limited and not CS.steeringPressed:
+      self.sat_count += self.sat_count_rate
+    else:
+      self.sat_count -= self.sat_count_rate
+    self.sat_count = clip(self.sat_count, 0.0, self.sat_limit)
+    return self.sat_count > (self.sat_limit - 1e-3)
+

@@ -77,7 +77,7 @@ class CarState(CarStateBase):
         self.last_angle = ret.steeringAngleDeg
         ret.steeringAngleDeg -= 2.41
 
-        #print(ret.steeringAngleDeg)
+        print(ret.steeringAngleDeg)
 
         can_gear = int(cp0.vl["GEAR_PACKET"]["GEAR"])
         ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))
