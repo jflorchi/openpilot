@@ -1,0 +1,24 @@
+services:
+  logserver:
+    build: .
+    restart: unless-stopped
+    environment:
+      # Must be the public URL the device will call back on -- for a named
+      # tunnel this is the hostname you mapped in the Cloudflare dashboard.
+      BASE_URL: ${BASE_URL:?set BASE_URL in .env}
+      REGISTRATION_TOKEN: ${REGISTRATION_TOKEN:-}
+      DATA_DIR: /data
+    volumes:
+      - ./data:/data
+    ports:
+      # Only bound to loopback: cloudflared reaches it over the compose network.
+      # Drop this whole block if you don't want local access at all, or change to
+      # "8080:8080" to also serve devices directly on your LAN.
+      - "127.0.0.1:8080:8080"
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:?set TUNNEL_TOKEN in .env}
+    depends_on:
+      - logserver

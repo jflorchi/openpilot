@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 import time
 import json
 import jwt
@@ -16,6 +17,10 @@ from selfdrive.swaglog import cloudlog
 
 
 UNREGISTERED_DONGLE_ID = "UnregisteredDevice"
+
+# Shared secret for self-hosted API servers that gate registration (see
+# tools/logserver). Unset by default, so nothing is sent to api.comma.ai.
+REGISTRATION_TOKEN = os.getenv("REGISTRATION_TOKEN")
 
 
 def is_registered_device() -> bool:
@@ -70,8 +75,12 @@ def register(show_spinner=False) -> Optional[str]:
       try:
         register_token = jwt.encode({'register': True, 'exp': datetime.utcnow() + timedelta(hours=1)}, private_key, algorithm='RS256')
         cloudlog.info("getting pilotauth")
+        extra = {}
+        if REGISTRATION_TOKEN is not None:
+          extra['registration_token'] = REGISTRATION_TOKEN
         resp = api_get("v2/pilotauth/", method='POST', timeout=15,
-                       imei=imei1, imei2=imei2, serial=serial, public_key=public_key, register_token=register_token)
+                       imei=imei1, imei2=imei2, serial=serial, public_key=public_key,
+                       register_token=register_token, **extra)
 
         if resp.status_code in (402, 403):
           cloudlog.info(f"Unable to register device, got {resp.status_code}")
