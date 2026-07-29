@@ -6,7 +6,9 @@ vice versa.
 """
 
 import functools
+import hashlib
 import mimetypes
+import os
 import shutil
 import subprocess
 import threading
@@ -142,6 +144,34 @@ def login():
     return render_template("login.html"), 401
 
   return render_template("login.html")
+
+
+@bp.route("/diag")
+def diag():
+  """Why won't it log me in? Reports the state of each stage without exposing the
+  password, the session contents, or the signing key."""
+  cookie = request.cookies.get("session")
+  return {
+    "web_password_configured": _PW_HASH is not None,
+    "password_source": ("WEB_PASSWORD_FILE" if os.getenv("WEB_PASSWORD_FILE")
+                        and not os.getenv("WEB_PASSWORD") else
+                        "WEB_PASSWORD" if os.getenv("WEB_PASSWORD") else None),
+    "password_length": len(store.WEB_PASSWORD) if store.WEB_PASSWORD else 0,
+    "cookies_received": sorted(request.cookies.keys()),
+    "session_cookie_present": cookie is not None,
+    # present but empty means the signature failed -- workers disagree on the key
+    "session_readable": bool(dict(session)) if cookie else None,
+    "authenticated": bool(session.get("auth")),
+    "request_scheme": request.scheme,
+    "secure_cookie_flag": bool(server_config("SESSION_COOKIE_SECURE")),
+    "worker_pid": os.getpid(),
+    "signing_key_fingerprint": hashlib.sha256(store.get_secret()).hexdigest()[:12],
+  }
+
+
+def server_config(key):
+  from flask import current_app
+  return current_app.config.get(key)
 
 
 @bp.route("/logout", methods=["POST"])

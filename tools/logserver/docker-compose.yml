@@ -8,7 +8,13 @@ services:
       BASE_URL: ${BASE_URL:?set BASE_URL in .env}
       REGISTRATION_TOKEN: ${REGISTRATION_TOKEN:-}
       # Password for the web interface at /ui. Unset leaves the UI switched off.
+      # Prefer the file: compose expands '$' in .env values, so a password
+      # containing one arrives mangled through the plain variable.
       WEB_PASSWORD: ${WEB_PASSWORD:-}
+      WEB_PASSWORD_FILE: /data/web_password
+      # Set SECURE_COOKIE=1 only if every client arrives over https -- it makes
+      # browsers refuse the session cookie on plain-http LAN access.
+      SECURE_COOKIE: ${SECURE_COOKIE:-}
       DATA_DIR: /data
     volumes:
       - ./data:/data

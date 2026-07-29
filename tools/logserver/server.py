@@ -25,10 +25,12 @@ Point the device at it:
 
 import hmac
 import json
+import os
 import time
 
 import jwt
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 import store
 from store import (BASE_URL, DATA_DIR, FILE_GROUPS, URL_TTL, check_signature, db,
@@ -39,10 +41,16 @@ app.secret_key = store.get_secret()
 app.config.update(
   SESSION_COOKIE_HTTPONLY=True,
   SESSION_COOKIE_SAMESITE="Lax",
-  # The device reaches us over the tunnel on https; only mark the cookie secure
-  # when we're actually being served that way, or local http testing breaks.
-  SESSION_COOKIE_SECURE=BASE_URL.startswith("https://"),
+  # Deliberately NOT keyed off BASE_URL. Marking the cookie Secure makes browsers
+  # drop it on any plain-http request, which silently breaks reaching the server
+  # directly on a LAN address even though the tunnel is https. Opt in with
+  # SECURE_COOKIE=1 when every client is guaranteed to arrive over https.
+  SESSION_COOKIE_SECURE=os.getenv("SECURE_COOKIE", "").lower() in ("1", "true", "yes"),
 )
+
+# cloudflared terminates TLS and forwards over http; without this Flask builds
+# redirects with the wrong scheme when it sits behind the tunnel.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1, x_host=1)
 
 
 # ---------------------------------------------------------------- auth

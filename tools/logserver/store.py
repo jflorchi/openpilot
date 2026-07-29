@@ -6,6 +6,7 @@ import hmac
 import os
 import re
 import sqlite3
+import tempfile
 import time
 from pathlib import Path
 
@@ -29,7 +30,13 @@ SECRET_PATH = DATA_DIR / "secret.key"
 REGISTRATION_TOKEN = os.getenv("REGISTRATION_TOKEN") or None
 
 # Password for the web interface. Unset means the UI stays switched off.
+# WEB_PASSWORD_FILE is the safer route: docker compose performs variable expansion
+# on .env values, so a password containing '$' arrives mangled via WEB_PASSWORD.
 WEB_PASSWORD = os.getenv("WEB_PASSWORD") or None
+_pw_file = os.getenv("WEB_PASSWORD_FILE")
+if not WEB_PASSWORD and _pw_file and Path(_pw_file).is_file():
+  # strip only the trailing newline an editor adds, never real whitespace
+  WEB_PASSWORD = Path(_pw_file).read_text().rstrip("\r\n") or None
 
 URL_TTL = 60 * 60  # signed upload/download URLs are good for an hour
 
@@ -62,10 +69,26 @@ FILE_LABELS = {
 
 
 def get_secret() -> bytes:
+  """Signing key for upload URLs and web sessions, generated once and persisted.
+
+  Every gunicorn worker calls this at import, so creation has to be atomic: two
+  workers racing on a fresh volume must not end up with different keys in memory,
+  or sessions signed by one get rejected by the other. os.link fails rather than
+  overwrites, so exactly one writer wins and everyone reads that same file.
+  """
   if not SECRET_PATH.exists():
     SECRET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SECRET_PATH.write_bytes(os.urandom(32))
-    SECRET_PATH.chmod(0o600)
+    fd, tmp_name = tempfile.mkstemp(prefix=".secret.", dir=SECRET_PATH.parent)
+    tmp = Path(tmp_name)
+    try:
+      with os.fdopen(fd, "wb") as f:
+        f.write(os.urandom(32))
+      tmp.chmod(0o600)
+      os.link(tmp, SECRET_PATH)
+    except FileExistsError:
+      pass  # another worker got there first; its key is the real one
+    finally:
+      tmp.unlink(missing_ok=True)
   return SECRET_PATH.read_bytes()
 
 

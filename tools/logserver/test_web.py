@@ -18,6 +18,7 @@ os.environ["BASE_URL"] = "http://testserver"
 os.environ["WEB_PASSWORD"] = "hunter2"
 
 import server  # noqa: E402
+import store  # noqa: E402
 
 client = server.app.test_client()
 
@@ -134,3 +135,28 @@ assert client.get(f"/v1.4/{dongle_id}/upload_url/", query_string={"path": "x/y"}
 print("isolation:  browser session grants no device API access")
 
 print("\nall web checks passed")
+
+# --- the signing key must be identical across concurrent workers (gunicorn forks
+# several, each calling get_secret() at import on a possibly-empty volume)
+import concurrent.futures  # noqa: E402
+import importlib  # noqa: E402
+import pathlib  # noqa: E402
+
+for _ in range(20):
+  pathlib.Path(store.SECRET_PATH).unlink(missing_ok=True)
+  with concurrent.futures.ThreadPoolExecutor(max_workers=8) as ex:
+    keys = set(ex.map(lambda _: store.get_secret(), range(8)))
+  assert len(keys) == 1, f"workers disagreed on the signing key: {len(keys)} distinct"
+  assert keys.pop() == pathlib.Path(store.SECRET_PATH).read_bytes(), "memory != disk"
+assert not list(pathlib.Path(store.DATA_DIR).glob(".secret.*")), "left temp files behind"
+print("secret:     stable across concurrent workers")
+
+# --- password file is read verbatim, dodging compose's $ expansion
+pw_path = os.path.join(tmpdir, "web_password")
+with open(pw_path, "w") as f:
+  f.write("p$a s#w'ord\n")   # the exact characters compose would mangle
+os.environ.pop("WEB_PASSWORD", None)
+os.environ["WEB_PASSWORD_FILE"] = pw_path
+importlib.reload(store)
+assert store.WEB_PASSWORD == "p$a s#w'ord", repr(store.WEB_PASSWORD)
+print("password:   file read verbatim, trailing newline stripped")
