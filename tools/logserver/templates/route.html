@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ time_str }} — Logbook{% endblock %}
+
+{% block breadcrumb %}
+<nav class="crumbs">
+  <a href="{{ url_for('web.device', dongle_id=dongle_id) }}">{{ dongle_id }}</a>
+  <span>{{ time_str }}</span>
+</nav>
+{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">{{ when|when }}</h1>
+  <p class="page-note">
+    {{ summary.count|duration }} · {{ summary.size|filesize }} · {{ time_str }}
+  </p>
+</header>
+
+{% if summary.has_video and has_ffmpeg %}
+<figure class="screen">
+  <video controls preload="metadata" playsinline
+         src="{{ url_for('web.route_video', dongle_id=dongle_id, time_str=time_str) }}"></video>
+  <figcaption>
+    Road camera, low resolution — the whole drive, stitched from
+    {{ summary.count }} segment{{ '' if summary.count == 1 else 's' }}.
+    First play builds the file and may take a moment.
+  </figcaption>
+</figure>
+{% elif summary.has_video and not has_ffmpeg %}
+<p class="notice">Footage is here, but <code>ffmpeg</code> isn't installed, so it can't be
+stitched for playback. Segment files are still downloadable below.</p>
+{% endif %}
+
+<h2 class="section">Segments</h2>
+<table class="files">
+  <thead>
+    <tr><th>#</th><th>Files</th></tr>
+  </thead>
+  <tbody>
+    {% for s in segments %}
+    <tr>
+      <th scope="row">{{ s.num }}</th>
+      <td>
+        {% for f in s.files %}
+        <a class="chip" download
+           href="{{ url_for('web.download', dongle_id=dongle_id, time_str=time_str, seg=s.num, fn=f.name) }}">
+          {{ f.label }}<span>{{ f.size|filesize }}</span>
+        </a>
+        {% else %}
+        <span class="chip-empty">no files</span>
+        {% endfor %}
+      </td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<details class="tools">
+  <summary>Open this drive in openpilot's tools</summary>
+  <pre>API_HOST={{ base_url }} tools/replay/replay '{{ dongle_id }}|{{ time_str }}'</pre>
+</details>
+{% endblock %}

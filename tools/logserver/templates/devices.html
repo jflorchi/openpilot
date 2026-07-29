@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Devices — Logbook{% endblock %}
+
+{% block content %}
+<h1 class="page-title">Devices</h1>
+
+{% if not devices %}
+<div class="empty">
+  <p class="empty-lead">No device has registered yet.</p>
+  <p>Set <code>API_HOST</code> on the device to this server, clear its dongle id, and reboot:</p>
+  <pre>export API_HOST="{{ base_url }}"
+rm /data/params/d/DongleId</pre>
+  <p>It appears here the first time it checks in.</p>
+</div>
+{% else %}
+
+<ul class="ledger">
+  {% for d in devices %}
+  <li>
+    <a class="row" href="{{ url_for('web.device', dongle_id=d.dongle_id) }}">
+      <span class="row-mark">{{ d.dongle_id[:4] }}</span>
+      <span class="row-main">
+        <span class="row-title">{{ d.dongle_id }}</span>
+        <span class="row-meta">serial {{ d.serial or '—' }} · seen {{ d.last_seen|when }}</span>
+      </span>
+      <span class="row-stats">
+        <b>{{ d.routes }}</b><span>drives</span>
+        <b>{{ d.minutes|duration }}</b><span>recorded</span>
+        <b>{{ d.size|filesize }}</b><span>stored</span>
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ul>
+{% endif %}
+{% endblock %}

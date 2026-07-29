@@ -60,6 +60,25 @@ pip install -r requirements.txt
 BASE_URL=http://192.168.1.50:8080 DATA_DIR=./data ./server.py
 ```
 
+## Web interface
+
+Set `WEB_PASSWORD` and browse to `/ui` to see your devices, drives, and footage.
+Leaving it unset keeps the UI switched off entirely.
+
+Each route page stitches that drive's `qcamera.ts` segments into a single seekable
+mp4. qcamera is already H.264 in MPEG-TS, so this is a stream copy rather than a
+re-encode — a long route takes a couple of seconds — and the result is cached as
+`route.mp4` beside the segments, rebuilt only when a newer segment arrives. Every
+individual file stays downloadable from the segment table.
+
+The full-resolution `fcamera.hevc` is a raw HEVC bitstream that browsers won't play,
+so it's offered as a download only. Playing it in-browser would mean a real
+transcode, which is far more expensive than the qcamera copy.
+
+Auth is a session cookie, completely separate from the device's JWT auth — a browser
+session grants no access to the device API, and a device token grants no access to
+the UI. Sessions last 14 days; failed logins are throttled to 8 per 5 minutes per IP.
+
 ## What it implements
 
 | Endpoint | Caller |
@@ -98,11 +117,17 @@ generated on first run and kept at `DATA_DIR/secret.key`.
 
 ```bash
 docker compose run --rm -e BASE_URL=http://test logserver python test_server.py
+docker compose run --rm -e BASE_URL=http://test logserver python test_web.py
 ```
 
-Generates a keypair, registers a fake device, and walks the same call sequence the
-uploader makes — segment uploads, bootlogs, dedupe, forged tokens, path traversal,
-and tampered URLs.
+`test_server.py` generates a keypair, registers a fake device, and walks the same
+call sequence the uploader makes — segment uploads, bootlogs, dedupe, forged tokens,
+path traversal, tampered URLs, and registration-token gating.
+
+`test_web.py` covers the UI: that every page and download redirects to login when
+anonymous, that a browser session grants no device API access, path traversal
+through the download route, and that a real two-segment route stitches into a valid
+seekable mp4.
 
 ## Things to know
 
@@ -121,6 +146,12 @@ and tampered URLs.
   cron job to prune `./data` or configure the device to upload qlogs only.
 - **SQLite + one volume.** Fine for a handful of devices. It is not built for
   concurrent writers across multiple hosts.
+- **Put the UI behind Cloudflare Access if the tunnel is public.** A single shared
+  password with basic throttling is reasonable for a personal server, but Access adds
+  real identity in front of it for the cost of a dashboard policy.
+- **Stitched videos add up.** Each `route.mp4` is roughly the size of that route's
+  qcamera segments combined, so browsing everything can nearly double qcamera storage.
+  They regenerate on demand, so `find data -name route.mp4 -delete` is always safe.
 - **No athena.** Athena is the persistent websocket connect uses for live remote
   control — SSH, screen viewing, on-demand uploads. This server implements only the
   REST API (the `api.comma.ai` role), so leave `ATHENA_HOST` unset; pointing it here

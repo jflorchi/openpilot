@@ -1,3 +1,4 @@
-flask>=2.0
+flask>=2.2
 pyjwt>=2.0
 cryptography>=3.4
+werkzeug>=2.2

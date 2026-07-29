@@ -16,8 +16,8 @@ os.environ["DATA_DIR"] = tmpdir
 os.environ["BASE_URL"] = "http://testserver"
 
 import server  # noqa: E402
+import store  # noqa: E402
 
-server.init_db()
 client = server.app.test_client()
 
 # a device keypair, as /persist/comma/id_rsa
@@ -133,7 +133,7 @@ print("ui stubs:   ok")
 
 
 # --- REGISTRATION_TOKEN gating (matches selfdrive/athena/registration.py)
-server.REGISTRATION_TOKEN = "s3cret"
+store.REGISTRATION_TOKEN = "s3cret"
 base = {"imei": "1", "imei2": "2", "serial": "gated-device",
         "public_key": public_key, "register_token": register_token}
 
@@ -145,6 +145,6 @@ assert client.post("/v2/pilotauth/", query_string={**base, "registration_token":
 r = client.post("/v2/pilotauth/", query_string={**base, "registration_token": "s3cret"})
 assert r.status_code == 200, r.data
 print("reg token:  gates registration correctly")
-server.REGISTRATION_TOKEN = None
+store.REGISTRATION_TOKEN = None
 
 print("\nall checks passed")

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ dongle_id }} — Logbook{% endblock %}
+
+{% block breadcrumb %}
+<nav class="crumbs"><span>{{ dongle_id }}</span></nav>
+{% endblock %}
+
+{% block content %}
+<header class="page-head">
+  <h1 class="page-title">Drives</h1>
+  <p class="page-note">{{ routes|length }} recorded · {{ total_size|filesize }} on disk</p>
+</header>
+
+{% if not routes %}
+<div class="empty">
+  <p class="empty-lead">This device hasn't uploaded anything yet.</p>
+  <p>Uploads run when the device is on wifi and offroad. To force one now:</p>
+  <pre>cd /data/openpilot && FORCEWIFI=1 python3 selfdrive/loggerd/uploader.py</pre>
+</div>
+{% else %}
+
+<ol class="ledger">
+  {% for r in routes %}
+  <li>
+    <a class="row" href="{{ url_for('web.route', dongle_id=dongle_id, time_str=r.time_str) }}">
+      <span class="row-mark {% if r.has_video %}has-video{% endif %}">
+        {% if r.when %}{{ r.when.strftime('%-d') }}<em>{{ r.when.strftime('%b') }}</em>{% else %}?{% endif %}
+      </span>
+      <span class="row-main">
+        <span class="row-title">{{ r.when|when }}</span>
+        <span class="row-meta">
+          {{ r.time_str }}
+          {%- if r.has_video %} · <span class="tag">video</span>{% endif %}
+        </span>
+      </span>
+      <span class="row-stats">
+        <b>{{ r.count|duration }}</b><span>length</span>
+        <b>{{ r.size|filesize }}</b><span>size</span>
+      </span>
+    </a>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+{% endblock %}

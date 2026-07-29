@@ -7,6 +7,8 @@ services:
       # tunnel this is the hostname you mapped in the Cloudflare dashboard.
       BASE_URL: ${BASE_URL:?set BASE_URL in .env}
       REGISTRATION_TOKEN: ${REGISTRATION_TOKEN:-}
+      # Password for the web interface at /ui. Unset leaves the UI switched off.
+      WEB_PASSWORD: ${WEB_PASSWORD:-}
       DATA_DIR: /data
     volumes:
       - ./data:/data

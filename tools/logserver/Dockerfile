@@ -2,10 +2,16 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# ffmpeg stitches a route's qcamera segments into one playable mp4
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg \
+ && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt gunicorn
 
-COPY server.py test_server.py ./
+COPY server.py store.py web.py test_server.py test_web.py ./
+COPY templates/ ./templates/
+COPY static/ ./static/
 
 # Uploads are large and slow over LTE, so give them a generous timeout and use
 # threaded workers -- the upload handler is IO bound, streaming to disk.

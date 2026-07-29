@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
 A minimal self-hosted replacement for the comma/retropilot API, just big enough
-to let an openpilot device register itself and upload its logs.
+to let an openpilot device register itself and upload its logs -- plus a web
+interface (web.py) for browsing and downloading what it collected.
 
 Implements the endpoints this fork actually calls:
 
@@ -13,7 +14,6 @@ Implements the endpoints this fork actually calls:
   GET  /v1.1/devices/<dongle_id>/stats    selfdrive/ui/qt/widgets/drive_stats.cc
   GET  /v1/route/<route>/files            tools/lib/route.py, replay
   GET  /v1/devices/<dongle_id>/bootlogs   tools/lib/bootlog.py
-  GET  /<dongle_id>/<time>/<seg>/<fn>     download URL handed out above
 
 Run:
   pip install -r requirements.txt
@@ -23,86 +23,26 @@ Point the device at it:
   API_HOST=http://192.168.1.50:8080
 """
 
-import hashlib
 import hmac
 import json
-import os
-import re
-import sqlite3
 import time
-from pathlib import Path
 
 import jwt
-from flask import Flask, Response, abort, jsonify, request, send_file
+from flask import Flask, Response, abort, jsonify, redirect, request, send_file
 
-# ---------------------------------------------------------------- config
-
-DATA_DIR = Path(os.getenv("DATA_DIR", "./data")).resolve()
-DB_PATH = Path(os.getenv("DB_PATH", DATA_DIR / "logserver.db"))
-HOST = os.getenv("HOST", "0.0.0.0")
-PORT = int(os.getenv("PORT", "8080"))
-
-# What the device should call back to. Must be reachable *from the comma device*,
-# so localhost will not work -- use the LAN IP or public hostname.
-BASE_URL = os.getenv("BASE_URL", f"http://127.0.0.1:{PORT}").rstrip("/")
-
-# Signs the short-lived upload/download URLs. Persisted so URLs survive a restart.
-SECRET_PATH = DATA_DIR / "secret.key"
-
-# Optional shared secret. If set, a device must send ?registration_token=<value>
-# to be allowed to register. Without it, any device that can reach the server
-# can claim a dongle id.
-REGISTRATION_TOKEN = os.getenv("REGISTRATION_TOKEN")
-
-URL_TTL = 60 * 60  # signed upload/download URLs are good for an hour
-
-SEGMENT_RE = re.compile(r"^(?P<time>\d{4}-\d{2}-\d{2}--\d{2}-\d{2}-\d{2})--(?P<seg>\d+)$")
-FILENAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+import store
+from store import (BASE_URL, DATA_DIR, FILE_GROUPS, URL_TTL, check_signature, db,
+                   get_device, safe_segment_path, segment_dirs, sign_url)
 
 app = Flask(__name__)
-
-
-def get_secret() -> bytes:
-  if not SECRET_PATH.exists():
-    SECRET_PATH.parent.mkdir(parents=True, exist_ok=True)
-    SECRET_PATH.write_bytes(os.urandom(32))
-    SECRET_PATH.chmod(0o600)
-  return SECRET_PATH.read_bytes()
-
-
-# ---------------------------------------------------------------- storage
-
-def db():
-  conn = sqlite3.connect(DB_PATH)
-  conn.row_factory = sqlite3.Row
-  return conn
-
-
-def init_db():
-  DATA_DIR.mkdir(parents=True, exist_ok=True)
-  with db() as conn:
-    conn.execute("""
-      CREATE TABLE IF NOT EXISTS devices (
-        dongle_id   TEXT PRIMARY KEY,
-        serial      TEXT UNIQUE,
-        public_key  TEXT NOT NULL,
-        imei        TEXT,
-        imei2       TEXT,
-        created_at  INTEGER NOT NULL,
-        last_seen   INTEGER NOT NULL
-      )
-    """)
-
-
-def get_device(dongle_id):
-  with db() as conn:
-    return conn.execute("SELECT * FROM devices WHERE dongle_id = ?", (dongle_id,)).fetchone()
-
-
-def dongle_id_for_serial(serial: str) -> str:
-  """Derive a stable 16-hex-char dongle id from the hardware serial, so a device
-  that re-registers (new keys, reflashed nvme) keeps its existing route history."""
-  return hashlib.sha256(("openpilot-logserver:" + serial).encode()).hexdigest()[:16]
+app.secret_key = store.get_secret()
+app.config.update(
+  SESSION_COOKIE_HTTPONLY=True,
+  SESSION_COOKIE_SAMESITE="Lax",
+  # The device reaches us over the tunnel on https; only mark the cookie secure
+  # when we're actually being served that way, or local http testing breaks.
+  SESSION_COOKIE_SECURE=BASE_URL.startswith("https://"),
+)
 
 
 # ---------------------------------------------------------------- auth
@@ -131,51 +71,6 @@ def verify_device_token(dongle_id: str):
   return device
 
 
-def sign_url(method: str, dongle_id: str, path: str, expires: int) -> str:
-  msg = f"{method}\n{dongle_id}\n{path}\n{expires}".encode()
-  return hmac.new(get_secret(), msg, hashlib.sha256).hexdigest()
-
-
-def check_signature(method: str, dongle_id: str, path: str):
-  try:
-    expires = int(request.args.get("expires", "0"))
-  except ValueError:
-    abort(403, "bad expiry")
-  if expires < time.time():
-    abort(403, "url expired")
-  expected = sign_url(method, dongle_id, path, expires)
-  if not hmac.compare_digest(expected, request.args.get("sig", "")):
-    abort(403, "bad signature")
-
-
-# ---------------------------------------------------------------- paths
-
-def safe_segment_path(dongle_id: str, key: str) -> Path:
-  """`key` is what the uploader sends: either '<segment-dir>/<filename>' e.g.
-  '2024-01-01--12-00-00--3/qlog.bz2', or one of the flat 'boot/' and 'crash/'
-  folders. Reject anything else so a malformed key can't escape DATA_DIR."""
-  parts = key.strip("/").split("/")
-  if len(parts) != 2:
-    abort(400, "bad path")
-
-  seg, fn = parts
-  if not FILENAME_RE.match(fn) or fn in (".", ".."):
-    abort(400, "bad path")
-
-  if seg in ("boot", "crash"):
-    out = DATA_DIR / dongle_id / seg / fn
-  else:
-    m = SEGMENT_RE.match(seg)
-    if not m:
-      abort(400, "bad path")
-    out = DATA_DIR / dongle_id / m.group("time") / m.group("seg") / fn
-
-  # belt and braces: the resolved path must still live under DATA_DIR
-  if not str(out.resolve()).startswith(str(DATA_DIR) + os.sep):
-    abort(400, "bad path")
-  return out
-
-
 # ---------------------------------------------------------------- registration
 
 @app.route("/v2/pilotauth/", methods=["POST"])
@@ -189,7 +84,8 @@ def pilotauth():
   if not serial or not public_key or not register_token:
     abort(400, "missing serial/public_key/register_token")
 
-  if REGISTRATION_TOKEN and not hmac.compare_digest(args.get("registration_token", ""), REGISTRATION_TOKEN):
+  if store.REGISTRATION_TOKEN and not hmac.compare_digest(
+      args.get("registration_token", ""), store.REGISTRATION_TOKEN):
     # 403 makes the device fall back to the UNREGISTERED_DONGLE_ID rather than retry forever
     abort(403, "registration not permitted")
 
@@ -201,7 +97,7 @@ def pilotauth():
   if not claims.get("register"):
     abort(400, "register_token missing register claim")
 
-  dongle_id = dongle_id_for_serial(serial)
+  dongle_id = store.dongle_id_for_serial(serial)
   now = int(time.time())
   with db() as conn:
     conn.execute("""
@@ -269,18 +165,6 @@ def do_upload(dongle_id, key):
 
 # ---------------------------------------------------------------- routes / files
 
-def segment_dirs(dongle_id):
-  root = DATA_DIR / dongle_id
-  if not root.is_dir():
-    return
-  for time_dir in sorted(root.iterdir()):
-    if not time_dir.is_dir() or time_dir.name in ("boot", "crash"):
-      continue
-    for seg_dir in sorted(time_dir.iterdir(), key=lambda p: int(p.name) if p.name.isdigit() else -1):
-      if seg_dir.is_dir():
-        yield time_dir.name, seg_dir.name, seg_dir
-
-
 def download_url(dongle_id, time_str, seg, fn):
   expires = int(time.time()) + URL_TTL
   key = f"{time_str}--{seg}/{fn}"
@@ -289,24 +173,12 @@ def download_url(dongle_id, time_str, seg, fn):
   return f"{BASE_URL}/{dongle_id}/{time_str}/{seg}/{fn}?expires={expires}&sig={sig}"
 
 
-# Which response key each filename belongs under, matching what connect/replay expect.
-FILE_GROUPS = {
-  "rlog": "logs", "rlog.bz2": "logs", "raw_log.bz2": "logs",
-  "qlog": "qlogs", "qlog.bz2": "qlogs",
-  "fcamera.hevc": "cameras", "video.hevc": "cameras",
-  "dcamera.hevc": "dcameras",
-  "ecamera.hevc": "ecameras",
-  "qcamera.ts": "qcameras",
-}
-
-
 @app.route("/v1/route/<route>/files")
 def route_files(route):
   # canonical name is "<dongle_id>|<time_str>"
-  if "|" in route:
-    dongle_id, _, time_str = route.partition("|")
-  else:
+  if "|" not in route:
     abort(400, "expected <dongle_id>|<route>")
+  dongle_id, _, time_str = route.partition("|")
 
   out = {k: [] for k in set(FILE_GROUPS.values())}
   for t, seg, seg_dir in segment_dirs(dongle_id):
@@ -388,7 +260,7 @@ def device_owner(dongle_id):
 def device_stats(dongle_id):
   # Real numbers would mean parsing every qlog; report segment counts instead
   # so the offroad UI has something coherent to show.
-  segs = [s for s in segment_dirs(dongle_id)]
+  segs = list(segment_dirs(dongle_id))
   routes = len({t for t, _, _ in segs})
   minutes = len(segs)  # segments are ~1 minute each
   blank = {"routes": routes, "distance": 0, "minutes": minutes}
@@ -402,19 +274,32 @@ def health():
   return jsonify({"ok": True, "devices": n, "data_dir": str(DATA_DIR)})
 
 
+@app.route("/")
+def index():
+  return redirect("/ui/")
+
+
 @app.errorhandler(400)
 @app.errorhandler(401)
 @app.errorhandler(403)
 @app.errorhandler(404)
 def json_error(e):
+  # The web interface renders its own error pages; only the API speaks JSON.
+  if request.path.startswith("/ui/"):
+    return e
   return jsonify({"error": e.description}), e.code
 
 
-init_db()  # at import, so `gunicorn server:app` works too
+store.init_db()  # at import, so `gunicorn server:app` works too
+
+import web  # noqa: E402  (imported after app exists to avoid a circular import)
+app.register_blueprint(web.bp)
 
 if __name__ == "__main__":
   print(f"data dir: {DATA_DIR}")
   print(f"base url: {BASE_URL}  (must be reachable from the device)")
-  if not REGISTRATION_TOKEN:
+  if not store.REGISTRATION_TOKEN:
     print("warning: REGISTRATION_TOKEN unset, any device that can reach this server can register")
-  app.run(host=HOST, port=PORT, threaded=True)
+  if not store.WEB_PASSWORD:
+    print("warning: WEB_PASSWORD unset, the web interface at /ui/ is disabled")
+  app.run(host=store.HOST, port=store.PORT, threaded=True)
