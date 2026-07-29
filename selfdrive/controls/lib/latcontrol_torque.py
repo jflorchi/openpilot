@@ -75,7 +75,7 @@ class LatControlTorque(LatControl):
       # Zero at road speed measured best of everything tried: the 0.39Hz lane weave dropped to
       # 151 against 374 at 100 and 509 at the original 200, with the lowest steering activity
       # too. Above 20 m/s the error is plain lateral accel, as upstream does at all speeds.
-      low_speed_factor = interp(CS.vEgo, [0, 10, 20], [200, 200, 0])
+      low_speed_factor = interp(CS.vEgo, [0, 10, 20], [500, 500, 0])
       setpoint = desired_lateral_accel + low_speed_factor * desired_curvature
       measurement = actual_lateral_accel + low_speed_factor * actual_curvature
       error = setpoint - measurement
