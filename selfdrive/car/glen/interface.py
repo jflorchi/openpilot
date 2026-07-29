@@ -27,7 +27,10 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        ret.steerActuatorDelay = 0.30
+        # Toyota platform default. Was 0.30, which is ~2.5x every other torque controlled car in
+        # the tree and feeds get_lag_adjusted_curvature twice: it sets the lookahead horizon
+        # (delay + .2) and then divides into psi to produce the commanded curvature.
+        ret.steerActuatorDelay = 0.12
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
