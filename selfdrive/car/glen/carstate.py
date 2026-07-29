@@ -142,7 +142,7 @@ class CarState(CarStateBase):
             ("CRUISE_CONTROL_STATE", "PCM_CRUISE_SM")
         ]
         checks = [
-            ("GEAR_PACKET", 1),
+            ("GEAR_PACKET", 30),
             ("LIGHT_STALK", 1),
             ("BODY_CONTROL_STATE", 3),
             ("ESP_CONTROL", 3),

@@ -179,10 +179,19 @@ BO_ 178 WHEEL_SPEEDS_REAR: 8 XXX
  SG_ WHEEL_SPEED_RL : 23|16@0+ (0.01,0) [0|65535] "" XXX
  SG_ WHEEL_SPEED_RR : 7|16@0+ (0.01,0) [0|65535] "" XXX
 
-BO_ 956 GEAR_PACKET: 8 XXX
+BO_ 720 GEAR_PACKET: 8 XXX
+ SG_ GEAR : 20|5@0+ (1,0) [0|31] "" XXX
+ SG_ GEAR_UNKNOWN_B7 : 23|1@0+ (1,0) [0|1] "" XXX
+
+BO_ 956 GEAR_PACKET_LEGACY: 8 XXX
  SG_ GEAR : 13|6@0+ (1,0) [0|63] "" XXX
  SG_ SPORT_ON : 3|1@0+ (1,0) [0|1] "" XXX
 
+CM_ BO_ 720 "Gear selector position, one-hot in byte 2, ~30Hz. 0x08 never observed;
+0x00 appears while the lever is between detents.";
+CM_ SG_ 720 GEAR_UNKNOWN_B7 "Not part of the gear code. Only ever seen set while in D.";
+CM_ BO_ 956 GEAR_PACKET_LEGACY "Stock Toyota gear packet location. Present on the bus at
+~83Hz but does not carry this car's gear selector, which is why GEAR_PACKET is 0x2D0.";
 CM_ SG_ 36 ACCEL_Y "unit is tbd";
 CM_ SG_ 36 YAW_RATE "verify";
 CM_ SG_ 36 STEERING_TORQUE "does not seem the steer torque, tbd";
@@ -196,4 +205,5 @@ VAL_ 1553 UNITS 1 "km" 2 "miles" ;
 VAL_ 1556 TURN_SIGNALS 3 "none" 2 "right" 1 "left" ;
 VAL_ 610 IPAS_STATE 5 "override" 3 "enabled" 1 "disabled" ;
 VAL_ 610 LKA_STATE 25 "temporary_fault" 9 "temporary_fault2" 5 "active" 1 "standby" ;
+VAL_ 720 GEAR 1 "P" 2 "R" 4 "N" 16 "D";
 VAL_ 956 GEAR 0 "D" 1 "S" 8 "N" 16 "R" 32 "P";
