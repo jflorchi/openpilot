@@ -26,9 +26,17 @@ UPLOAD_ATTR_VALUE = b'1'
 
 UPLOAD_QLOG_QCAM_MAX_SIZE = 100 * 1e6  # MB
 
+# Raw files the device will hand over once the qlog/qcamera queue is drained, in
+# the order they get sent. rlog first: it's the smallest and the most useful on
+# its own. dcamera is driver-facing, so it's off unless it's asked for by name.
+RAW_PRIORITY = {"rlog": 10, "rlog.bz2": 10, "ecamera.hevc": 11, "fcamera.hevc": 12, "dcamera.hevc": 13}
+RAW_KINDS_DEFAULT = "rlog,ecamera.hevc,fcamera.hevc"
+
 allow_sleep = bool(os.getenv("UPLOADER_SLEEP", "1"))
 force_wifi = os.getenv("FORCEWIFI") is not None
 fake_upload = os.getenv("FAKEUPLOAD") is not None
+# Bypasses the wifi/unmetered gate too, so it stays out of the normal path.
+force_raw = os.getenv("UPLOADRAW") is not None
 
 
 def get_directory_sort(d):
@@ -77,10 +85,17 @@ class Uploader():
 
     self.immediate_folders = ["crash/", "boot/"]
     self.immediate_priority = {"qlog": 0, "qlog.bz2": 0, "qcamera.ts": 1}
+    self.raw_kinds = set()
+
+  def set_raw_kinds(self, kinds):
+    """Which raw filenames are eligible, read from the UploadRawKinds param."""
+    self.raw_kinds = {k.strip() for k in kinds.split(",") if k.strip()}
 
   def get_upload_sort(self, name):
     if name in self.immediate_priority:
       return self.immediate_priority[name]
+    if name in RAW_PRIORITY:
+      return RAW_PRIORITY[name]
     return 1000
 
   def list_upload_files(self):
@@ -121,7 +136,7 @@ class Uploader():
 
         yield (name, key, fn)
 
-  def next_file_to_upload(self):
+  def next_file_to_upload(self, raw_allowed=False):
     upload_files = list(self.list_upload_files())
 
     for name, key, fn in upload_files:
@@ -131,6 +146,13 @@ class Uploader():
     for name, key, fn in upload_files:
       if name in self.immediate_priority:
         return (name, key, fn)
+
+    # Raw logs and full-res video only once nothing above is left, so a slow or
+    # interrupted raw transfer can never delay the qlog for the current drive.
+    if raw_allowed:
+      for name, key, fn in upload_files:
+        if name in self.raw_kinds:
+          return (name, key, fn)
 
     return None
 
@@ -258,7 +280,15 @@ def uploader_fn(exit_event):
         time.sleep(60 if offroad else 5)
       continue
 
-    d = uploader.next_file_to_upload()
+    # Raw is opt-in and only over unmetered wifi -- a segment of fcamera.hevc is
+    # ~40x the size of the qcamera for the same minute. Re-read every pass so
+    # toggling it takes effect without restarting the process.
+    uploader.set_raw_kinds(params.get("UploadRawKinds", encoding='utf8') or RAW_KINDS_DEFAULT)
+    raw_allowed = force_raw or (params.get_bool("UploadRaw") and
+                                network_type == NetworkType.wifi and
+                                not sm['deviceState'].networkMetered)
+
+    d = uploader.next_file_to_upload(raw_allowed)
     if d is None:  # Nothing to upload
       if allow_sleep:
         time.sleep(60 if offroad else 5)

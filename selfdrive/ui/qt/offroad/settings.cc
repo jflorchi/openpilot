@@ -60,6 +60,12 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
       "../assets/offroad/icon_monitoring.png",
     },
     {
+      "UploadRaw",
+      "Upload Raw Logs and Video",
+      "Upload full resolution video and raw logs to your server, in addition to the compressed ones. Only over unmetered Wi-Fi, and only once everything else has finished uploading. This transfers several GB per hour of driving.",
+      "../assets/offroad/icon_network.png",
+    },
+    {
       "DisengageOnAccelerator",
       "Disengage On Accelerator Pedal",
       "When enabled, pressing the accelerator pedal will disengage openpilot.",
