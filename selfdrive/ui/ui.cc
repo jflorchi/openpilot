@@ -1,5 +1,6 @@
 #include "selfdrive/ui/ui.h"
 
+#include <array>
 #include <cassert>
 #include <cmath>
 
@@ -15,6 +16,18 @@
 #define BACKLIGHT_DT 0.05
 #define BACKLIGHT_TS 10.00
 #define BACKLIGHT_OFFROAD 50
+
+#define UI_DT (1.0 / UI_FREQ)
+
+// The model output is noisy frame to frame and switches between plan hypotheses, which is very
+// visible on the drawn path. Controls smooth this out in the MPC, the UI draws the raw output.
+#define PATH_TS 0.10
+// Snap to the model instead of filtering when it moves this much in one frame, so the path stays
+// responsive to real maneuvers and to the model resetting.
+#define PATH_MAX_JUMP 1.5
+// Radar dRel is only used to shorten the drawn path, but it's noisy enough to make the end of the
+// path pump in and out at the frame rate.
+#define LEAD_D_TS 0.20
 
 // Projects a point in car to space to the corresponding point in full frame
 // image space.
@@ -44,6 +57,42 @@ static int get_path_length_idx(const cereal::ModelDataV2::XYZTData::Reader &line
   return max_idx;
 }
 
+// Low-pass filtered model path in car space. Exposes the same accessors as the capnp reader so it
+// can be handed to update_line_data() in its place.
+struct FilteredPath {
+  std::array<float, TRAJECTORY_SIZE> x = {}, y = {}, z = {};
+
+  const std::array<float, TRAJECTORY_SIZE> &getX() const { return x; }
+  const std::array<float, TRAJECTORY_SIZE> &getY() const { return y; }
+  const std::array<float, TRAJECTORY_SIZE> &getZ() const { return z; }
+
+  void update(const cereal::ModelDataV2::XYZTData::Reader &line, uint64_t cur_started_frame) {
+    const auto line_x = line.getX(), line_y = line.getY(), line_z = line.getZ();
+    const float k = (UI_DT / PATH_TS) / (1.0 + UI_DT / PATH_TS);
+
+    bool reset = !valid || cur_started_frame != started_frame;
+    for (int i = 0; !reset && i < TRAJECTORY_SIZE; i++) {
+      reset = std::abs(line_y[i] - y[i]) > PATH_MAX_JUMP;
+    }
+
+    for (int i = 0; i < TRAJECTORY_SIZE; i++) {
+      x[i] = reset ? line_x[i] : (1. - k) * x[i] + k * line_x[i];
+      y[i] = reset ? line_y[i] : (1. - k) * y[i] + k * line_y[i];
+      z[i] = reset ? line_z[i] : (1. - k) * z[i] + k * line_z[i];
+    }
+    started_frame = cur_started_frame;
+    valid = true;
+  }
+
+private:
+  bool valid = false;
+  uint64_t started_frame = 0;
+};
+
+static FilteredPath path_filter;
+static FirstOrderFilter lead_d_filter(0.0, LEAD_D_TS, UI_DT);
+static bool lead_d_filter_valid = false;
+
 static void update_leads(UIState *s, const cereal::RadarState::Reader &radar_state, const cereal::ModelDataV2::XYZTData::Reader &line) {
   for (int i = 0; i < 2; ++i) {
     auto lead_data = (i == 0) ? radar_state.getLeadOne() : radar_state.getLeadTwo();
@@ -54,23 +103,50 @@ static void update_leads(UIState *s, const cereal::RadarState::Reader &radar_sta
   }
 }
 
-static void update_line_data(const UIState *s, const cereal::ModelDataV2::XYZTData::Reader &line,
-                             float y_off, float z_off, line_vertices_data *pvd, int max_idx, bool allow_invert=true) {
+// Linearly interpolates the line at the given distance, returns false if the line doesn't reach it.
+template <typename LineT>
+static bool interp_line_at(const LineT &line, float distance, float *y_out, float *z_out) {
+  const auto line_x = line.getX(), line_y = line.getY(), line_z = line.getZ();
+  for (int i = 1; i < TRAJECTORY_SIZE; i++) {
+    if (line_x[i] >= distance) {
+      const float dx = line_x[i] - line_x[i - 1];
+      const float t = dx > 0 ? std::clamp((distance - line_x[i - 1]) / dx, 0.0f, 1.0f) : 0.0f;
+      *y_out = line_y[i - 1] + t * (line_y[i] - line_y[i - 1]);
+      *z_out = line_z[i - 1] + t * (line_z[i] - line_z[i - 1]);
+      return true;
+    }
+  }
+  return false;
+}
+
+template <typename LineT>
+static void update_line_data(const UIState *s, const LineT &line,
+                             float y_off, float z_off, line_vertices_data *pvd, float max_distance, bool allow_invert=true) {
   const auto line_x = line.getX(), line_y = line.getY(), line_z = line.getZ();
 
   std::vector<QPointF> left_points, right_points;
-  for (int i = 0; i <= max_idx; i++) {
+  auto add_point = [&](float x, float y, float z) {
     QPointF left, right;
-    bool l = calib_frame_to_full_frame(s, line_x[i], line_y[i] - y_off, line_z[i] + z_off, &left);
-    bool r = calib_frame_to_full_frame(s, line_x[i], line_y[i] + y_off, line_z[i] + z_off, &right);
+    bool l = calib_frame_to_full_frame(s, x, y - y_off, z + z_off, &left);
+    bool r = calib_frame_to_full_frame(s, x, y + y_off, z + z_off, &right);
     if (l && r) {
       // For wider lines the drawn polygon will "invert" when going over a hill and cause artifacts
       if (!allow_invert && left_points.size() && left.y() > left_points.back().y()) {
-        continue;
+        return;
       }
       left_points.push_back(left);
       right_points.push_back(right);
     }
+  };
+
+  for (int i = 0; i < TRAJECTORY_SIZE && line_x[i] < max_distance; i++) {
+    add_point(line_x[i], line_y[i], line_z[i]);
+  }
+  // End exactly at max_distance. Truncating at a trajectory point instead makes the tip of the line
+  // snap by a whole segment (~15m at highway speed) as max_distance moves.
+  float end_y, end_z;
+  if (interp_line_at(line, max_distance, &end_y, &end_z)) {
+    add_point(max_distance, end_y, end_z);
   }
 
   pvd->cnt = 2 * left_points.size();
@@ -86,17 +162,16 @@ static void update_line_data(const UIState *s, const cereal::ModelDataV2::XYZTDa
 
 static void update_model(UIState *s, const cereal::ModelDataV2::Reader &model) {
   UIScene &scene = s->scene;
-  auto model_position = model.getPosition();
-  float max_distance = std::clamp(model_position.getX()[TRAJECTORY_SIZE - 1],
+  path_filter.update(model.getPosition(), scene.started_frame);
+  float max_distance = std::clamp(path_filter.getX()[TRAJECTORY_SIZE - 1],
                                   MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE);
 
   // update lane lines
   const auto lane_lines = model.getLaneLines();
   const auto lane_line_probs = model.getLaneLineProbs();
-  int max_idx = get_path_length_idx(lane_lines[0], max_distance);
   for (int i = 0; i < std::size(scene.lane_line_vertices); i++) {
     scene.lane_line_probs[i] = lane_line_probs[i];
-    update_line_data(s, lane_lines[i], 0.025 * scene.lane_line_probs[i], 0, &scene.lane_line_vertices[i], max_idx);
+    update_line_data(s, lane_lines[i], 0.025 * scene.lane_line_probs[i], 0, &scene.lane_line_vertices[i], max_distance);
   }
 
   // update road edges
@@ -104,17 +179,22 @@ static void update_model(UIState *s, const cereal::ModelDataV2::Reader &model) {
   const auto road_edge_stds = model.getRoadEdgeStds();
   for (int i = 0; i < std::size(scene.road_edge_vertices); i++) {
     scene.road_edge_stds[i] = road_edge_stds[i];
-    update_line_data(s, road_edges[i], 0.025, 0, &scene.road_edge_vertices[i], max_idx);
+    update_line_data(s, road_edges[i], 0.025, 0, &scene.road_edge_vertices[i], max_distance);
   }
 
   // update path
   auto lead_one = (*s->sm)["radarState"].getRadarState().getLeadOne();
   if (lead_one.getStatus()) {
-    const float lead_d = lead_one.getDRel() * 2.;
+    if (!lead_d_filter_valid) {
+      lead_d_filter.reset(lead_one.getDRel());
+      lead_d_filter_valid = true;
+    }
+    const float lead_d = lead_d_filter.update(lead_one.getDRel()) * 2.;
     max_distance = std::clamp((float)(lead_d - fmin(lead_d * 0.35, 10.)), 0.0f, max_distance);
+  } else {
+    lead_d_filter_valid = false;
   }
-  max_idx = get_path_length_idx(model_position, max_distance);
-  update_line_data(s, model_position, 0.9, 1.22, &scene.track_vertices, max_idx, false);
+  update_line_data(s, path_filter, 0.9, 1.22, &scene.track_vertices, max_distance, false);
 }
 
 static void update_sockets(UIState *s) {
