@@ -23,11 +23,14 @@ VBATT_INSTANT_PAUSE_CHARGING = 7.0    # Lower limit on the instant car battery v
 MAX_TIME_OFFROAD_S = 30*3600
 MIN_ON_TIME_S = 3600
 
-# Keep the device battery in a mid-SoC band instead of parked at full. The float voltage
-# itself isn't settable on the EON (the VOLTAGE_MAX property setter is a no-op), so the
-# only lever is cutting charging by capacity.
-BATT_PERC_CHARGE_STOP = 70
-BATT_PERC_CHARGE_START = 60
+# Keep the battery well below its 4.2V ceiling. The charger floats at 4.35V and its float
+# voltage isn't settable (the VOLTAGE_MAX property setter is a no-op), so the only lever is
+# cutting charging off. This gates on measured voltage rather than the reported capacity
+# percentage: the fuel gauge runs the stock letv_zl1_scud profile, so its SoC readings do
+# not describe a replacement cell, but voltage_now is a direct measurement either way.
+# The band is far wider than the ~50mV IR offset at the 2A charge current.
+BATT_VOLTAGE_CHARGE_STOP_uV = 4050000
+BATT_VOLTAGE_CHARGE_START_uV = 3850000
 
 class PowerMonitoring:
   def __init__(self):
@@ -39,7 +42,7 @@ class PowerMonitoring:
     self.car_voltage_mV = 12e3                  # Low-passed version of peripheralState voltage
     self.car_voltage_instant_mV = 12e3          # Last value of peripheralState voltage
     self.integration_lock = threading.Lock()
-    self.battery_charging_target = True          # Desired state of the charger, see _update_battery_charging
+    self.battery_charging_target = False         # Desired state of the charger, see _update_battery_charging
     self.pulse_measurement_running = False       # The pulsed measurement owns the charger while it runs
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity")
@@ -49,19 +52,22 @@ class PowerMonitoring:
     # Reset capacity if it's low
     self.car_battery_capacity_uWh = max((CAR_BATTERY_CAPACITY_uWh / 10), int(car_battery_capacity_uWh))
 
-  # Hold the battery between BATT_PERC_CHARGE_START and BATT_PERC_CHARGE_STOP. The charger
-  # re-enables itself ~25s after charging is disabled, so the target is re-asserted every
-  # tick rather than written once on transitions.
+  # Hold the battery between BATT_VOLTAGE_CHARGE_START_uV and BATT_VOLTAGE_CHARGE_STOP_uV.
+  # The charger re-enables itself ~25s after charging is disabled, so the target is
+  # re-asserted every tick rather than written once on transitions.
   def _update_battery_charging(self) -> None:
     try:
       if self.pulse_measurement_running:
         return
 
-      capacity = HARDWARE.get_battery_capacity()
-      if capacity >= BATT_PERC_CHARGE_STOP:
-        self.battery_charging_target = False
-      elif capacity <= BATT_PERC_CHARGE_START:
-        self.battery_charging_target = True
+      # Leave the target alone if the voltage can't be read, so an unreadable
+      # measurement can never be the reason charging gets turned back on
+      voltage = HARDWARE.get_battery_voltage()
+      if voltage is not None:
+        if voltage >= BATT_VOLTAGE_CHARGE_STOP_uV:
+          self.battery_charging_target = False
+        elif voltage <= BATT_VOLTAGE_CHARGE_START_uV:
+          self.battery_charging_target = True
 
       HARDWARE.set_battery_charging(self.battery_charging_target)
     except Exception:
