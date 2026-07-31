@@ -65,24 +65,7 @@ class LatControlTorque(LatControl):
       actual_lateral_accel = actual_curvature * CS.vEgo ** 2
       lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
-      # This weights curvature error alongside lateral accel error, which scales the effective
-      # proportional gain by (1 + low_speed_factor / v^2). The original 500/200 gave 6.0x at
-      # 10 m/s and 1.46x at 21 m/s against 1.18x on the highway, and the extra low speed gain
-      # showed up in the logs as oscillation that is absent at highway speed. Cutting it to
-      # 200/100 removed everything above 0.5Hz; this takes the road speed end to zero, so above
-      # 20 m/s the error is plain lateral accel, as upstream does at all speeds. Lateral accel is
-      # only a weak error signal when slow, so the low speed end keeps some weighting.
-      # Zero at road speed measured best of everything tried: the 0.39Hz lane weave dropped to
-      # 151 against 374 at 100 and 509 at the original 200, with the lowest steering activity
-      # too. Above 20 m/s the error is plain lateral accel, as upstream does at all speeds.
-      # The taper now ends at 15 rather than 20 m/s. The steering angle deadzone scales as v^2,
-      # so it kills the friction term 83% of the time at 31-38 m/s but only 10% at 10-16, which
-      # left the whole schedule lopsided: total loop gain was 1.38 at 12 m/s and 0.91 at 14
-      # against 0.28 on the highway. Logs matched the seat - steering angle 0.25-1.5Hz power was
-      # 0.067 at 13-17 m/s against 0.009 at 21-25 and 0.017 at 31-38, and the worst windows of
-      # the drive all sat between 12 and 19 m/s, inside the old taper. Ending at 15 leaves both
-      # ends alone and only pulls down the band that was actually oscillating.
-      low_speed_factor = interp(CS.vEgo, [0, 8, 15], [500, 500, 0])
+      low_speed_factor = interp(CS.vEgo, [0, 10, 20], [500, 500, 200])
       setpoint = desired_lateral_accel + low_speed_factor * desired_curvature
       measurement = actual_lateral_accel + low_speed_factor * actual_curvature
       error = setpoint - measurement

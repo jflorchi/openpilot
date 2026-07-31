@@ -30,7 +30,7 @@ class CarInterface(CarInterfaceBase):
         # Toyota platform default. Was 0.30, which is ~2.5x every other torque controlled car in
         # the tree and feeds get_lag_adjusted_curvature twice: it sets the lookahead horizon
         # (delay + .2) and then divides into psi to produce the commanded curvature.
-        ret.steerActuatorDelay = 0.12
+        ret.steerActuatorDelay = 0.30
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
@@ -39,7 +39,7 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 18.27
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.02, steering_angle_deadzone_deg=0.5)
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.012, steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
