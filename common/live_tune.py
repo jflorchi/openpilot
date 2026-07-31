@@ -21,13 +21,14 @@ LIVE_TUNE_LOG_PATH = os.path.join(LIVE_TUNE_DIR, "live_tune_log.jsonl")
 
 
 class Knob:
-  def __init__(self, key, label, lo, hi, step, group, unit="", desc=""):
+  def __init__(self, key, label, lo, hi, step, group, default, unit="", desc=""):
     self.key = key
     self.label = label
     self.lo = lo
     self.hi = hi
     self.step = step
     self.group = group
+    self.default = default
     self.unit = unit
     self.desc = desc
 
@@ -36,27 +37,35 @@ class Knob:
 
   def as_dict(self):
     return {"key": self.key, "label": self.label, "min": self.lo, "max": self.hi,
-            "step": self.step, "group": self.group, "unit": self.unit, "desc": self.desc}
+            "step": self.step, "group": self.group, "default": self.default,
+            "unit": self.unit, "desc": self.desc}
 
 
 # The ranges here are the safety limits: nothing outside them can reach the controller,
 # no matter what gets POSTed or hand-edited into the JSON.
+#
+# The defaults mirror what the car port actually sets, so the UI shows the right "stock"
+# value before controlsd has ever run. controlsd overwrites them from CarParams at startup
+# (write_defaults below), which is authoritative -- these are just the offroad fallback.
+#   latAccelFactor / friction / steerActuatorDelay: selfdrive/car/glen/interface.py
+#   kp / ki / kf:                                   set_torque_tune, latcontrol_torque.py
+#   lowSpeedFactor*:                                LOW_SPEED_FACTOR_*, latcontrol_torque.py
 KNOBS = [
-  Knob("latAccelFactor", "Lat Accel Factor", 1.0, 5.0, 0.05, "torque",
+  Knob("latAccelFactor", "Lat Accel Factor", 1.0, 5.0, 0.05, "torque", 3.6,
        desc="Lateral accel the car makes at full torque. Lower = more steer for the same request."),
-  Knob("friction", "Friction", 0.0, 0.20, 0.002, "torque",
+  Knob("friction", "Friction", 0.0, 0.20, 0.002, "torque", 0.012,
        desc="Torque added in the direction of the error. Behaves like extra P around center."),
-  Knob("kp", "P gain", 0.0, 3.0, 0.05, "pid",
+  Knob("kp", "P gain", 0.0, 3.0, 0.05, "pid", 1.0,
        desc="Proportional gain on lat accel error."),
-  Knob("ki", "I gain", 0.0, 1.0, 0.01, "pid",
+  Knob("ki", "I gain", 0.0, 1.0, 0.01, "pid", 0.1,
        desc="Integral gain. Too high wanders, too low holds an offset in long curves."),
-  Knob("kf", "FF gain", 0.0, 2.0, 0.05, "pid",
+  Knob("kf", "FF gain", 0.0, 2.0, 0.05, "pid", 1.0,
        desc="Feedforward scale. This is what does most of the steering."),
-  Knob("steerActuatorDelay", "Actuator Delay", 0.0, 0.60, 0.01, "plan", unit="s",
+  Knob("steerActuatorDelay", "Actuator Delay", 0.0, 0.60, 0.01, "plan", 0.30, unit="s",
        desc="Lookahead. Sets the planner horizon and divides into psi, so it acts as a gain too."),
-  Knob("lowSpeedFactorLow", "Low Speed Factor @ 0-10 m/s", 0.0, 800.0, 10.0, "plan",
+  Knob("lowSpeedFactorLow", "Low Speed Factor @ 0-10 m/s", 0.0, 800.0, 10.0, "plan", 500.0,
        desc="Curvature weighting in the error at low speed."),
-  Knob("lowSpeedFactorHigh", "Low Speed Factor @ 20 m/s", 0.0, 800.0, 10.0, "plan",
+  Knob("lowSpeedFactorHigh", "Low Speed Factor @ 20 m/s", 0.0, 800.0, 10.0, "plan", 200.0,
        desc="Curvature weighting in the error at highway speed."),
 ]
 
@@ -114,11 +123,15 @@ def write_defaults(defaults):
 
 
 def read_defaults():
+  """Stock values for the UI. Declared defaults, overlaid with whatever controlsd
+  published from the live CarParams, so every knob always has a stock value to show."""
+  defaults = {k.key: k.default for k in KNOBS}
   try:
     with open(LIVE_TUNE_DEFAULTS_PATH) as f:
-      return sanitize(json.load(f))
+      defaults.update(sanitize(json.load(f)))
   except (OSError, ValueError, AttributeError):
-    return {}
+    pass
+  return defaults
 
 
 def log_snapshot(note, values):

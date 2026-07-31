@@ -155,7 +155,7 @@ function fmt(knob, v) {
 function effective(knob) {
   if (knob.key in values) return values[knob.key];
   if (knob.key in defaults) return defaults[knob.key];
-  return (knob.min + knob.max) / 2;
+  return knob.default;
 }
 
 function build() {
