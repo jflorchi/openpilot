@@ -8,6 +8,7 @@ from common.numpy_fast import clip
 from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from common.profiler import Profiler
 from common.params import Params, put_nonblocking
+from common.live_tune import LiveTuneReader, write_defaults
 import cereal.messaging as messaging
 from common.conversions import Conversions as CV
 from panda import ALTERNATIVE_EXPERIENCE
@@ -151,6 +152,20 @@ class Controls:
       self.LaC = LatControlTorque(self.CP, self.CI)
     elif self.CP.lateralTuning.which() == 'model':
       self.LaC = LatControlModel(self.CP, self.CI)
+
+    # live lateral tuning from the web UI (selfdrive/livetuned)
+    self.live_tune = LiveTuneReader()
+    if isinstance(self.LaC, LatControlTorque):
+      write_defaults({
+        'latAccelFactor': self.CP.lateralTuning.torque.latAccelFactor,
+        'friction': self.CP.lateralTuning.torque.friction,
+        'kp': self.CP.lateralTuning.torque.kp,
+        'ki': self.CP.lateralTuning.torque.ki,
+        'kf': self.CP.lateralTuning.torque.kf,
+        'steerActuatorDelay': self.CP.steerActuatorDelay,
+        'lowSpeedFactorLow': self.LaC.base_low_speed_factor[0],
+        'lowSpeedFactorHigh': self.LaC.base_low_speed_factor[1],
+      })
 
     self.initialized = False
     self.state = State.disabled
@@ -550,10 +565,14 @@ class Controls:
     self.VM.update_params(x, sr)
 
     # Update Torque Params
+    live_tune = self.live_tune.update(sec_since_boot())
     if self.CP.lateralTuning.which() == 'torque':
       torque_params = self.sm['liveTorqueParameters']
       if self.sm.all_checks(['liveTorqueParameters']) and torque_params.useParams:
         self.LaC.update_live_torque_params(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered, torque_params.frictionCoefficientFiltered)
+    if isinstance(self.LaC, LatControlTorque):
+      # applied last so a knob pinned in the web tuner beats both torqued and the car port
+      self.LaC.update_live_tune(live_tune)
 
     lat_plan = self.sm['lateralPlan']
     long_plan = self.sm['longitudinalPlan']
@@ -590,7 +609,8 @@ class Controls:
       self.desired_curvature, self.desired_curvature_rate = get_lag_adjusted_curvature(self.CP, CS.vEgo,
                                                                                        lat_plan.psis,
                                                                                        lat_plan.curvatures,
-                                                                                       lat_plan.curvatureRates)
+                                                                                       lat_plan.curvatureRates,
+                                                                                       self.live_tune.get().get('steerActuatorDelay'))
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, params,
                                                                              self.last_actuators, self.steer_limited, self.desired_curvature,
                                                                              self.desired_curvature_rate, self.sm['liveLocationKalman'])

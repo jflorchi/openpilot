@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101114">
+<title>lat tune</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0; padding: 0 12px calc(24px + env(safe-area-inset-bottom));
+    background: #101114; color: #e8e8ea;
+    font: 15px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-text-size-adjust: 100%;
+  }
+  header {
+    position: sticky; top: 0; z-index: 10;
+    background: rgba(16,17,20,.96); backdrop-filter: blur(8px);
+    padding: 12px 0 10px; margin: 0 -12px 12px; padding-left: 12px; padding-right: 12px;
+    border-bottom: 1px solid #26272c;
+  }
+  .statusrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .pill {
+    font-size: 12px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase;
+    padding: 5px 10px; border-radius: 999px; background: #1c1d22; color: #8b8d96;
+  }
+  .pill.on  { background: #14361f; color: #4ade80; }
+  .pill.off { background: #38181b; color: #f87171; }
+  .pill.warn{ background: #3a2e10; color: #fbbf24; }
+  .metrics {
+    display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 10px;
+  }
+  .metric { background: #17181d; border-radius: 8px; padding: 6px 8px; }
+  .metric .k { font-size: 10px; color: #71737c; text-transform: uppercase; letter-spacing: .05em; }
+  .metric .v { font-size: 17px; font-weight: 650; font-variant-numeric: tabular-nums; }
+
+  h2 {
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: #71737c; margin: 22px 0 8px;
+  }
+  .knob {
+    background: #17181d; border: 1px solid #23242a; border-radius: 12px;
+    padding: 12px 14px 14px; margin-bottom: 10px;
+  }
+  .knob.modified { border-color: #3b6ea5; }
+  .knob .top { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; }
+  .knob .label { font-weight: 600; font-size: 15px; }
+  .knob .val { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .knob .stock { font-size: 11px; color: #71737c; margin-top: 2px; }
+  .knob .desc { font-size: 12px; color: #71737c; margin-top: 6px; }
+
+  .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
+  button {
+    font: inherit; color: #e8e8ea; background: #23242b; border: none;
+    border-radius: 10px; padding: 12px 16px; font-weight: 600; cursor: pointer;
+  }
+  button:active { background: #34363f; }
+  .step {
+    flex: 0 0 62px; height: 52px; font-size: 24px; font-weight: 700;
+  }
+  input[type=range] {
+    flex: 1; -webkit-appearance: none; appearance: none; height: 52px;
+    background: transparent; margin: 0;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 8px; border-radius: 4px; background: #2c2e36;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 34px; height: 34px; border-radius: 50%; background: #e8e8ea;
+    margin-top: -13px; box-shadow: 0 1px 4px rgba(0,0,0,.5);
+  }
+  input[type=range]::-moz-range-track { height: 8px; border-radius: 4px; background: #2c2e36; }
+  input[type=range]::-moz-range-thumb {
+    width: 34px; height: 34px; border: none; border-radius: 50%; background: #e8e8ea;
+  }
+  input[type=text] {
+    flex: 1; font: inherit; padding: 12px; border-radius: 10px;
+    border: 1px solid #2c2e36; background: #101114; color: #e8e8ea;
+  }
+  .wide { flex: 1; }
+  .danger { background: #3a1c20; color: #f87171; }
+  .primary { background: #1d4ed8; }
+  .ghost { background: transparent; border: 1px solid #2c2e36; color: #9a9ca4; font-size: 13px; padding: 8px 12px; }
+  #toast {
+    position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom));
+    transform: translateX(-50%) translateY(20px);
+    background: #e8e8ea; color: #101114; font-weight: 600;
+    padding: 10px 18px; border-radius: 999px; opacity: 0;
+    transition: opacity .2s, transform .2s; pointer-events: none; z-index: 20;
+  }
+  #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="statusrow">
+    <span class="pill" id="p-conn">connecting</span>
+    <span class="pill" id="p-eng">--</span>
+    <span class="pill" id="p-tune">stock</span>
+    <button class="ghost" id="btn-arm" style="margin-left:auto">disarm</button>
+  </div>
+  <div class="metrics">
+    <div class="metric"><div class="k">speed</div><div class="v" id="m-speed">--</div></div>
+    <div class="metric"><div class="k">lat accel err</div><div class="v" id="m-err">--</div></div>
+    <div class="metric"><div class="k">torque</div><div class="v" id="m-out">--</div></div>
+  </div>
+</header>
+
+<main id="knobs"></main>
+
+<h2>session</h2>
+<div class="knob">
+  <div class="row">
+    <input type="text" id="note" placeholder="note, e.g. &quot;curvy road, feels lazy&quot;">
+    <button class="primary" id="btn-snap">Mark</button>
+  </div>
+  <div class="row">
+    <button class="danger wide" id="btn-reset">Reset everything to stock</button>
+  </div>
+  <div class="desc" style="font-size:12px;color:#71737c;margin-top:10px">
+    Marks are written to /data/live_tune_log.jsonl with a timestamp and the current values.
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+"use strict";
+
+var GROUPS = { torque: "torque", pid: "pid gains", plan: "planner / lookahead" };
+
+var knobs = [], defaults = {}, values = {}, enabled = false;
+var dragging = null;      // key currently being dragged, so polling can't yank the slider
+var pendingUntil = 0;     // ignore server values briefly after a local write
+
+function toast(msg) {
+  var t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(t._timer);
+  t._timer = setTimeout(function () { t.classList.remove("show"); }, 1400);
+}
+
+function decimals(step) {
+  var s = String(step);
+  return s.indexOf(".") < 0 ? 0 : s.length - s.indexOf(".") - 1;
+}
+
+function fmt(knob, v) {
+  return Number(v).toFixed(decimals(knob.step)) + (knob.unit ? " " + knob.unit : "");
+}
+
+function effective(knob) {
+  if (knob.key in values) return values[knob.key];
+  if (knob.key in defaults) return defaults[knob.key];
+  return (knob.min + knob.max) / 2;
+}
+
+function build() {
+  var main = document.getElementById("knobs");
+  main.innerHTML = "";
+  var seen = {};
+
+  knobs.forEach(function (knob) {
+    if (!seen[knob.group]) {
+      seen[knob.group] = true;
+      var h = document.createElement("h2");
+      h.textContent = GROUPS[knob.group] || knob.group;
+      main.appendChild(h);
+    }
+
+    var el = document.createElement("div");
+    el.className = "knob";
+    el.id = "knob-" + knob.key;
+    el.innerHTML =
+      '<div class="top"><div><div class="label"></div><div class="stock"></div></div>' +
+      '<div class="val"></div></div>' +
+      '<div class="row"><button class="step" data-dir="-1">&minus;</button>' +
+      '<input type="range"><button class="step" data-dir="1">+</button></div>' +
+      '<div class="desc"></div>';
+    el.querySelector(".label").textContent = knob.label;
+    el.querySelector(".desc").textContent = knob.desc;
+
+    var slider = el.querySelector("input");
+    slider.min = knob.min; slider.max = knob.max; slider.step = knob.step;
+
+    slider.addEventListener("input", function () {
+      dragging = knob.key;
+      values[knob.key] = parseFloat(slider.value);
+      render();
+    });
+    var commit = function () {
+      if (dragging !== knob.key) return;
+      dragging = null;
+      send(knob.key, parseFloat(slider.value));
+    };
+    slider.addEventListener("change", commit);
+    slider.addEventListener("pointerup", commit);
+    slider.addEventListener("touchend", commit);
+
+    el.querySelectorAll(".step").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var dir = parseFloat(btn.dataset.dir);
+        var next = effective(knob) + dir * knob.step;
+        next = Math.min(knob.max, Math.max(knob.min, next));
+        // step is often fractional, so round away accumulated float error
+        next = parseFloat(next.toFixed(decimals(knob.step) + 2));
+        values[knob.key] = next;
+        render();
+        send(knob.key, next);
+      });
+    });
+
+    main.appendChild(el);
+  });
+}
+
+function render() {
+  var modified = 0;
+  knobs.forEach(function (knob) {
+    var el = document.getElementById("knob-" + knob.key);
+    if (!el) return;
+    var v = effective(knob);
+    el.querySelector(".val").textContent = fmt(knob, v);
+    if (dragging !== knob.key) el.querySelector("input").value = v;
+
+    var isMod = knob.key in values;
+    if (isMod) modified++;
+    el.classList.toggle("modified", isMod);
+
+    var stock = el.querySelector(".stock");
+    if (knob.key in defaults) {
+      var d = defaults[knob.key];
+      var delta = v - d;
+      stock.textContent = "stock " + fmt(knob, d) +
+        (isMod && Math.abs(delta) > 1e-9 ? "  (" + (delta > 0 ? "+" : "") + delta.toFixed(decimals(knob.step)) + ")" : "");
+    } else {
+      stock.textContent = "";
+    }
+  });
+
+  var pt = document.getElementById("p-tune");
+  if (!enabled || modified === 0) {
+    pt.textContent = "stock"; pt.className = "pill";
+  } else {
+    pt.textContent = modified + " live"; pt.className = "pill warn";
+  }
+  document.getElementById("btn-arm").textContent = enabled ? "disarm" : "arm";
+}
+
+function renderStatus(s) {
+  var pc = document.getElementById("p-conn");
+  pc.textContent = s.alive ? "onroad" : "offroad";
+  pc.className = "pill " + (s.alive ? "on" : "");
+
+  var pe = document.getElementById("p-eng");
+  if (!s.alive) { pe.textContent = "--"; pe.className = "pill"; }
+  else if (s.active) { pe.textContent = "engaged"; pe.className = "pill on"; }
+  else { pe.textContent = "not engaged"; pe.className = "pill off"; }
+
+  var m = function (id, v) { document.getElementById(id).textContent = v; };
+  m("m-speed", s.vEgoMph === undefined ? "--" : s.vEgoMph + " mph");
+  m("m-err", s.latAccelError === undefined ? "--" : s.latAccelError.toFixed(2));
+  m("m-out", s.output === undefined ? "--" : (s.saturated ? "SAT" : s.output.toFixed(2)));
+}
+
+function apply(data, fromWrite) {
+  var first = knobs.length === 0;
+  knobs = data.knobs;
+  defaults = data.defaults || {};
+  enabled = data.enabled;
+  // don't stomp what the user is touching right now
+  if (fromWrite || (dragging === null && Date.now() > pendingUntil)) {
+    var held = dragging !== null && dragging in values ? values[dragging] : undefined;
+    values = data.values || {};
+    if (held !== undefined) values[dragging] = held;
+  }
+  if (first) build();
+  render();
+  renderStatus(data.status || {});
+}
+
+function post(path, body, ok) {
+  pendingUntil = Date.now() + 1000;
+  fetch(path, { method: "POST", body: JSON.stringify(body || {}) })
+    .then(function (r) { return r.json(); })
+    .then(function (d) { apply(d, true); if (ok) ok(); })
+    .catch(function () { toast("lost connection"); });
+}
+
+function send(key, value) {
+  post("/api/set", { key: key, value: value });
+}
+
+function poll() {
+  fetch("/api/state")
+    .then(function (r) { return r.json(); })
+    .then(function (d) { apply(d, false); })
+    .catch(function () {
+      document.getElementById("p-conn").textContent = "no device";
+      document.getElementById("p-conn").className = "pill off";
+    });
+}
+
+document.getElementById("btn-arm").addEventListener("click", function () {
+  post("/api/enabled", { enabled: !enabled }, function () {
+    toast(enabled ? "live tune armed" : "back to stock");
+  });
+});
+
+document.getElementById("btn-reset").addEventListener("click", function () {
+  if (!confirm("Clear all overrides and go back to the car's stock tune?")) return;
+  post("/api/reset", {}, function () { toast("reset to stock"); });
+});
+
+document.getElementById("btn-snap").addEventListener("click", function () {
+  var note = document.getElementById("note");
+  post("/api/snapshot", { note: note.value }, function () {
+    note.value = "";
+    note.blur();
+    toast("marked");
+  });
+});
+
+poll();
+setInterval(function () { if (!document.hidden) poll(); }, 1000);
+</script>
+</body>
+</html>

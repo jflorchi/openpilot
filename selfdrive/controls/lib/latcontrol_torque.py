@@ -17,6 +17,10 @@ from selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
 # friction in the steering wheel that needs to be overcome to
 # move it at all, this is compensated for too.
 
+LOW_SPEED_FACTOR_LOW = 500.
+LOW_SPEED_FACTOR_HIGH = 200.
+
+
 def set_torque_tune(tune, MAX_LAT_ACCEL=2.5, FRICTION=.1, steering_angle_deadzone_deg=0.0):
   tune.init('torque')
   tune.torque.useSteeringAngle = True
@@ -38,10 +42,33 @@ class LatControlTorque(LatControl):
     self.use_steering_angle = self.torque_params.useSteeringAngle
     self.steering_angle_deadzone_deg = self.torque_params.steeringAngleDeadzoneDeg
 
+    # baselines the live tuner falls back to when a knob is cleared
+    self.base_gains = (self.torque_params.kp, self.torque_params.ki, self.torque_params.kf)
+    self.base_low_speed_factor = (LOW_SPEED_FACTOR_LOW, LOW_SPEED_FACTOR_HIGH)
+    self.low_speed_factor = self.base_low_speed_factor
+
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
     self.torque_params.latAccelFactor = latAccelFactor
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
+
+  def update_live_tune(self, live_tune):
+    """Apply web tuner overrides. Runs after torqued so a pinned value wins."""
+    if 'latAccelFactor' in live_tune:
+      self.torque_params.latAccelFactor = live_tune['latAccelFactor']
+    if 'friction' in live_tune:
+      self.torque_params.friction = live_tune['friction']
+
+    self.low_speed_factor = (live_tune.get('lowSpeedFactorLow', self.base_low_speed_factor[0]),
+                             live_tune.get('lowSpeedFactorHigh', self.base_low_speed_factor[1]))
+
+    # set gains in place rather than rebuilding the PID, which would dump the integrator
+    kp = live_tune.get('kp', self.base_gains[0])
+    ki = live_tune.get('ki', self.base_gains[1])
+    kf = live_tune.get('kf', self.base_gains[2])
+    self.pid._k_p = [[0], [kp]]
+    self.pid._k_i = [[0], [ki]]
+    self.pid.k_f = kf
 
   def update(self, active, CS, VM, params, last_actuators, steer_limited, desired_curvature, desired_curvature_rate, llk):
     pid_log = log.ControlsState.LateralTorqueState.new_message()
@@ -65,7 +92,9 @@ class LatControlTorque(LatControl):
       actual_lateral_accel = actual_curvature * CS.vEgo ** 2
       lateral_accel_deadzone = curvature_deadzone * CS.vEgo ** 2
 
-      low_speed_factor = interp(CS.vEgo, [0, 10, 20], [500, 500, 200])
+      low_speed_factor = interp(CS.vEgo, [0, 10, 20], [self.low_speed_factor[0],
+                                                       self.low_speed_factor[0],
+                                                       self.low_speed_factor[1]])
       setpoint = desired_lateral_accel + low_speed_factor * desired_curvature
       measurement = actual_lateral_accel + low_speed_factor * actual_curvature
       error = setpoint - measurement

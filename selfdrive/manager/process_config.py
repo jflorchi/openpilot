@@ -47,6 +47,7 @@ procs = [
   PythonProcess("tombstoned", "selfdrive.tombstoned", enabled=not PC, offroad=True),
   PythonProcess("uploader", "selfdrive.loggerd.uploader", offroad=True),
   PythonProcess("statsd", "selfdrive.statsd", offroad=True),
+  PythonProcess("livetuned", "selfdrive.livetuned.livetuned", offroad=True),
 
   # EON only
   PythonProcess("rtshield", "selfdrive.rtshield", enabled=EON),
