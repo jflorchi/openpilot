@@ -23,6 +23,12 @@ VBATT_INSTANT_PAUSE_CHARGING = 7.0    # Lower limit on the instant car battery v
 MAX_TIME_OFFROAD_S = 30*3600
 MIN_ON_TIME_S = 3600
 
+# Keep the device battery in a mid-SoC band instead of parked at full. The float voltage
+# itself isn't settable on the EON (the VOLTAGE_MAX property setter is a no-op), so the
+# only lever is cutting charging by capacity.
+BATT_PERC_CHARGE_STOP = 70
+BATT_PERC_CHARGE_START = 60
+
 class PowerMonitoring:
   def __init__(self):
     self.params = Params()
@@ -33,6 +39,8 @@ class PowerMonitoring:
     self.car_voltage_mV = 12e3                  # Low-passed version of peripheralState voltage
     self.car_voltage_instant_mV = 12e3          # Last value of peripheralState voltage
     self.integration_lock = threading.Lock()
+    self.battery_charging_target = True          # Desired state of the charger, see _update_battery_charging
+    self.pulse_measurement_running = False       # The pulsed measurement owns the charger while it runs
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity")
     if car_battery_capacity_uWh is None:
@@ -41,8 +49,28 @@ class PowerMonitoring:
     # Reset capacity if it's low
     self.car_battery_capacity_uWh = max((CAR_BATTERY_CAPACITY_uWh / 10), int(car_battery_capacity_uWh))
 
+  # Hold the battery between BATT_PERC_CHARGE_START and BATT_PERC_CHARGE_STOP. The charger
+  # re-enables itself ~25s after charging is disabled, so the target is re-asserted every
+  # tick rather than written once on transitions.
+  def _update_battery_charging(self) -> None:
+    try:
+      if self.pulse_measurement_running:
+        return
+
+      capacity = HARDWARE.get_battery_capacity()
+      if capacity >= BATT_PERC_CHARGE_STOP:
+        self.battery_charging_target = False
+      elif capacity <= BATT_PERC_CHARGE_START:
+        self.battery_charging_target = True
+
+      HARDWARE.set_battery_charging(self.battery_charging_target)
+    except Exception:
+      cloudlog.exception("Battery charge limiting failed")
+
   # Calculation tick
   def calculate(self, peripheralState, ignition):
+    self._update_battery_charging()
+
     try:
       now = sec_since_boot()
 
@@ -109,12 +137,15 @@ class PowerMonitoring:
 
               self._perform_integration(now, current_power * FUDGE_FACTOR)
 
-              # Enable charging again
-              HARDWARE.set_battery_charging(True)
+              # Restore whatever the charge limiting wants, which is not always on
+              HARDWARE.set_battery_charging(self.battery_charging_target)
             except Exception:
               cloudlog.exception("Pulsed power measurement failed")
+            finally:
+              self.pulse_measurement_running = False
 
           # Start pulsed measurement and return
+          self.pulse_measurement_running = True
           threading.Thread(target=perform_pulse_measurement, args=(now,)).start()
           self.next_pulsed_measurement_time = None
           return
