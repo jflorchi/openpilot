@@ -23,14 +23,22 @@ VBATT_INSTANT_PAUSE_CHARGING = 7.0    # Lower limit on the instant car battery v
 MAX_TIME_OFFROAD_S = 30*3600
 MIN_ON_TIME_S = 3600
 
-# Keep the battery well below its 4.2V ceiling. The charger floats at 4.35V and its float
-# voltage isn't settable (the VOLTAGE_MAX property setter is a no-op), so the only lever is
-# cutting charging off. This gates on measured voltage rather than the reported capacity
-# percentage: the fuel gauge runs the stock letv_zl1_scud profile, so its SoC readings do
-# not describe a replacement cell, but voltage_now is a direct measurement either way.
-# The band is far wider than the ~50mV IR offset at the 2A charge current.
+# Hold the battery near its nominal voltage rather than near its 4.35V ceiling. The battery
+# is only a buffer for brief current spikes, so there is no reason to carry a high state of
+# charge, and a cell held at ~35% is both far more thermally stable and slower to age than a
+# full one. The charger floats at 4.35V and its float voltage isn't settable (the VOLTAGE_MAX
+# property setter is a no-op), so the only lever is cutting charging off.
+# This gates on measured voltage rather than the reported capacity percentage: the fuel gauge
+# runs the stock letv_zl1_scud profile, so its SoC readings do not describe a replacement
+# cell, but voltage_now is a direct measurement either way.
+#
+# voltage_now is terminal voltage, which the IR drop shifts in opposite directions depending
+# on whether the pack is charging or discharging. The pack measures ~180mV/A, so it reads
+# ~270mV high while charging at 1.5A and ~45mV low while discharging at idle. Two consequences:
+# a 4.05V cutoff parks the cell at ~3.78V resting, and the band has to stay wider than that
+# ~315mV swing or the charger oscillates at the tick rate.
 BATT_VOLTAGE_CHARGE_STOP_uV = 4050000
-BATT_VOLTAGE_CHARGE_START_uV = 3850000
+BATT_VOLTAGE_CHARGE_START_uV = 3600000
 
 class PowerMonitoring:
   def __init__(self):
