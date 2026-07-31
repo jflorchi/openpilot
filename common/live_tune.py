@@ -10,6 +10,7 @@ the value the car port (or torqued) would have used, so an empty file == stock.
 """
 import json
 import os
+import tempfile
 import time
 
 from common.numpy_fast import clip
@@ -87,12 +88,22 @@ def sanitize(values):
 
 
 def _atomic_write(path, text):
-  tmp = path + ".tmp"
-  with open(tmp, "w") as f:
-    f.write(text)
-    f.flush()
-    os.fsync(f.fileno())
-  os.rename(tmp, path)
+  tmp = None
+  try:
+    with tempfile.NamedTemporaryFile(mode="w", dir=os.path.dirname(path),
+                                     prefix=os.path.basename(path) + ".", delete=False) as f:
+      tmp = f.name
+      f.write(text)
+      f.flush()
+      os.fsync(f.fileno())
+    os.replace(tmp, path)
+    tmp = None
+  finally:
+    if tmp is not None:
+      try:
+        os.unlink(tmp)
+      except OSError:
+        pass
 
 
 def write_state(state):

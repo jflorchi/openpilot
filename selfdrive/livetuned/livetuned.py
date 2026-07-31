@@ -76,6 +76,7 @@ class Status:
 
 
 status = Status()
+state_write_lock = threading.Lock()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,33 +131,40 @@ class Handler(BaseHTTPRequestHandler):
   def do_POST(self):
     path = self.path.split("?")[0]
     body = self._read_json()
-    state = read_state()
 
-    if path == "/api/set":
-      values = dict(state["values"])
-      incoming = body.get("values", {})
-      if "key" in body:
-        incoming = {body["key"]: body.get("value")}
-      for key, val in incoming.items():
-        if key not in KNOBS_BY_KEY:
-          continue
-        if val is None:  # null clears the override, falling back to stock
-          values.pop(key, None)
-        else:
-          values[key] = val
-      # any adjustment implicitly arms the tuner, otherwise the slider does nothing
-      state = write_state({"enabled": True, "values": values})
-    elif path == "/api/enabled":
-      state = write_state({"enabled": bool(body.get("enabled")), "values": state["values"]})
-    elif path == "/api/reset":
-      state = write_state({"enabled": False, "values": {}})
-    elif path == "/api/snapshot":
-      log_snapshot(str(body.get("note", ""))[:200], state["values"])
-    else:
-      self._send(404, "not found", "text/plain")
-      return
+    # ThreadingHTTPServer can process requests from multiple clients concurrently.
+    # Keep each read/modify/write transaction together so adjustments cannot overwrite
+    # one another, and serialize snapshot appends for the same reason.
+    with state_write_lock:
+      state = read_state()
 
-    self._send_json(self._state_payload())
+      if path == "/api/set":
+        values = dict(state["values"])
+        incoming = body.get("values", {})
+        if "key" in body:
+          incoming = {body["key"]: body.get("value")}
+        for key, val in incoming.items():
+          if key not in KNOBS_BY_KEY:
+            continue
+          if val is None:  # null clears the override, falling back to stock
+            values.pop(key, None)
+          else:
+            values[key] = val
+        # any adjustment implicitly arms the tuner, otherwise the slider does nothing
+        write_state({"enabled": True, "values": values})
+      elif path == "/api/enabled":
+        write_state({"enabled": bool(body.get("enabled")), "values": state["values"]})
+      elif path == "/api/reset":
+        write_state({"enabled": False, "values": {}})
+      elif path == "/api/snapshot":
+        log_snapshot(str(body.get("note", ""))[:200], state["values"])
+      else:
+        self._send(404, "not found", "text/plain")
+        return
+
+      payload = self._state_payload()
+
+    self._send_json(payload)
 
 
 def local_ips():

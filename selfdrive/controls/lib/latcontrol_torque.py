@@ -44,20 +44,21 @@ class LatControlTorque(LatControl):
 
     # baselines the live tuner falls back to when a knob is cleared
     self.base_gains = (self.torque_params.kp, self.torque_params.ki, self.torque_params.kf)
+    self.base_lat_accel_factor = self.torque_params.latAccelFactor
+    self.base_friction = self.torque_params.friction
     self.base_low_speed_factor = (LOW_SPEED_FACTOR_LOW, LOW_SPEED_FACTOR_HIGH)
     self.low_speed_factor = self.base_low_speed_factor
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
-    self.torque_params.latAccelFactor = latAccelFactor
+    # The latest valid torqued values become the fallback for cleared web overrides.
+    self.base_lat_accel_factor = latAccelFactor
+    self.base_friction = friction
     self.torque_params.latAccelOffset = latAccelOffset
-    self.torque_params.friction = friction
 
   def update_live_tune(self, live_tune):
     """Apply web tuner overrides. Runs after torqued so a pinned value wins."""
-    if 'latAccelFactor' in live_tune:
-      self.torque_params.latAccelFactor = live_tune['latAccelFactor']
-    if 'friction' in live_tune:
-      self.torque_params.friction = live_tune['friction']
+    self.torque_params.latAccelFactor = live_tune.get('latAccelFactor', self.base_lat_accel_factor)
+    self.torque_params.friction = live_tune.get('friction', self.base_friction)
 
     self.low_speed_factor = (live_tune.get('lowSpeedFactorLow', self.base_low_speed_factor[0]),
                              live_tune.get('lowSpeedFactorHigh', self.base_low_speed_factor[1]))
