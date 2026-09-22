@@ -120,6 +120,9 @@ if __name__ == '__main__':
   for i in range(2):
     imgs = d[f'imgs{i}'].astype(np.float32)
     if int(os.environ.get('NORMALIZED', 0)): imgs = (imgs - 127.5) / 63.75  # final model: modeld normalizes
+    if inputs['imgs'][1] == 128 * 256 * 32 * 4:  # channel-last model input: per pixel 4 frames x (6 channels + 2 unused)
+      fr = imgs.reshape(4, 6, 128, 256).transpose(2, 3, 0, 1)
+      imgs = np.concatenate([fr, np.zeros((128, 256, 4, 2), np.float32)], -1).reshape(1, 128, 256, 32)
     feed = {'imgs': imgs, 'desire_tokens': d[f'desire{i}'], 'feat_hist': d[f'feat{i}'],
             'traffic_convention': np.array([[1, 0]], np.float32), 'action_t': np.array([[0.275, 0.525]], np.float32)}
     feed = {k: v for k, v in feed.items() if k in inputs}

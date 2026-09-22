@@ -11,7 +11,7 @@
 
 ModelFrame::ModelFrame(cl_device_id device_id, cl_context context, float input_scale, float input_offset) {
   input_frames = std::make_unique<float[]>(buf_size);
-  single_frame = std::make_unique<float[]>(MODEL_FRAME_SIZE);
+  single_frame = std::make_unique<float[]>(HWC8_FRAME_SIZE);
 
   q = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
   y_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, MODEL_WIDTH * MODEL_HEIGHT, NULL, &err));
@@ -43,18 +43,25 @@ float* ModelFrame::prepare(cl_mem yuv_cl, int frame_width, int frame_height, con
   }
 }
 
-const float* ModelFrame::prepare_single(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection) {
+const float* ModelFrame::prepare_single_hwc8(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection) {
+  if (hwc8_cl == nullptr) {
+    cl_context ctx;
+    CL_CHECK(clGetCommandQueueInfo(q, CL_QUEUE_CONTEXT, sizeof(ctx), &ctx, NULL));
+    hwc8_cl = CL_CHECK_ERR(clCreateBuffer(ctx, CL_MEM_READ_WRITE, HWC8_FRAME_SIZE * sizeof(float), NULL, &err));
+  }
   transform_queue(&this->transform, q,
                   yuv_cl, frame_width, frame_height,
                   y_cl, u_cl, v_cl, MODEL_WIDTH, MODEL_HEIGHT, projection);
   loadyuv_queue(&loadyuv, q, y_cl, u_cl, v_cl, net_input_cl);
-  CL_CHECK(clEnqueueReadBuffer(q, net_input_cl, CL_TRUE, 0, MODEL_FRAME_SIZE * sizeof(float), single_frame.get(), 0, nullptr, nullptr));
+  loadyuv_to_hwc8(&loadyuv, q, net_input_cl, hwc8_cl);
+  CL_CHECK(clEnqueueReadBuffer(q, hwc8_cl, CL_TRUE, 0, HWC8_FRAME_SIZE * sizeof(float), single_frame.get(), 0, nullptr, nullptr));
   return single_frame.get();
 }
 
 ModelFrame::~ModelFrame() {
   transform_destroy(&transform);
   loadyuv_destroy(&loadyuv);
+  if (hwc8_cl != nullptr) CL_CHECK(clReleaseMemObject(hwc8_cl));
   CL_CHECK(clReleaseMemObject(net_input_cl));
   CL_CHECK(clReleaseMemObject(v_cl));
   CL_CHECK(clReleaseMemObject(u_cl));

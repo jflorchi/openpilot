@@ -160,9 +160,9 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
 
   // frames: narrow and wide (the narrow camera again on the comma two), each into its ring at ring_head
   VisionBuf *wide = (wbuf != nullptr) ? wbuf : buf;
-  std::memcpy(s->ring[0].get() + s->ring_head * FRAME_SIZE, s->frame->prepare_single(buf->buf_cl, buf->width, buf->height, transform),
+  std::memcpy(s->ring[0].get() + s->ring_head * FRAME_SIZE, s->frame->prepare_single_hwc8(buf->buf_cl, buf->width, buf->height, transform),
               FRAME_SIZE * sizeof(float));
-  std::memcpy(s->ring[1].get() + s->ring_head * FRAME_SIZE, s->wide_frame->prepare_single(wide->buf_cl, wide->width, wide->height, transform_wide),
+  std::memcpy(s->ring[1].get() + s->ring_head * FRAME_SIZE, s->wide_frame->prepare_single_hwc8(wide->buf_cl, wide->width, wide->height, transform_wide),
               FRAME_SIZE * sizeof(float));
   const int slot_t = s->ring_head, slot_t4 = (s->ring_head + 1) % RING;  // newest and 4 frames ago
   s->ring_head = (s->ring_head + 1) % RING;
@@ -179,12 +179,15 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
     return nullptr;
   }
 
-  // model input 'imgs': narrow t-4, narrow t, wide t-4, wide t
+  // model input 'imgs' [1,128,256,32], channel-last: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each)
   float *imgs = s->imgs.get();
-  std::memcpy(imgs + 0 * FRAME_SIZE, s->ring[0].get() + slot_t4 * FRAME_SIZE, FRAME_SIZE * sizeof(float));
-  std::memcpy(imgs + 1 * FRAME_SIZE, s->ring[0].get() + slot_t * FRAME_SIZE, FRAME_SIZE * sizeof(float));
-  std::memcpy(imgs + 2 * FRAME_SIZE, s->ring[1].get() + slot_t4 * FRAME_SIZE, FRAME_SIZE * sizeof(float));
-  std::memcpy(imgs + 3 * FRAME_SIZE, s->ring[1].get() + slot_t * FRAME_SIZE, FRAME_SIZE * sizeof(float));
+  const float *src[4] = {s->ring[0].get() + slot_t4 * FRAME_SIZE, s->ring[0].get() + slot_t * FRAME_SIZE,
+                         s->ring[1].get() + slot_t4 * FRAME_SIZE, s->ring[1].get() + slot_t * FRAME_SIZE};
+  for (int p = 0; p < PIXELS; p++) {
+    for (int f = 0; f < 4; f++) {
+      std::memcpy(imgs + p * 32 + f * 8, src[f] + p * 8, 8 * sizeof(float));
+    }
+  }
 
   // feature history tokens: every 4th of the 96-step history (rows 0, 4, .., 92), the last 8 = rows 64 .. 92,
   // i.e. the features of frames t-32 .. t-4 (taken before this frame's feature is pushed)

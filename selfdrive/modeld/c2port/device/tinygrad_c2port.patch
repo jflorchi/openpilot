@@ -165,7 +165,7 @@ index 44cbb1801..e3470c8e8 100644
        else:
          print("UNSUPPORTED", n.op_type, n.input, n.output)
 diff --git a/openpilot/compile.py b/openpilot/compile.py
-index 743b72725..30ec6a26c 100644
+index 743b72725..5359bbc5c 100644
 --- a/openpilot/compile.py
 +++ b/openpilot/compile.py
 @@ -8,7 +8,7 @@ import os
@@ -187,7 +187,7 @@ index 743b72725..30ec6a26c 100644
 -    "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
 -    "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
 -    "desire": np.zeros((1, 8)),
-+    "imgs": np.random.rand(1, 24, 128, 256)*255,
++    "imgs": np.random.rand(1, 128, 256, 32)*4 - 2,  # channel-last, normalized (split_input_frames.py, strip_input_norm.py)
 +    "desire_tokens": np.zeros((1, 200)),
 +    "feat_hist": feat / np.linalg.norm(feat, axis=-1, keepdims=True),  # history features are unit norm
      "traffic_convention": np.array([[1., 0.]]),

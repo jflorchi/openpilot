@@ -261,7 +261,9 @@ namespace c2port {
   constexpr int OUTPUT_SIZE = 2576;
   constexpr int META = 0, DESIRE_PRED = 55, POSE = 87, LANE_LINES = 117, LANE_LINES_PROB = 645, ROAD_EDGES = 653,
                 LEAD = 917, LEAD_PROB = 1061, HIDDEN = 1064, PLAN = 1576, DESIRE_STATE = 2566;
-  constexpr int FRAME_SIZE = 6 * 128 * 256;      // one camera frame in the model's 6-channel YUV layout
+  constexpr int PIXELS = 128 * 256;
+  constexpr int FRAME_SIZE = PIXELS * 8;         // one camera frame, channel-last: 6 YUV channels + 2 unused per pixel
+  // model input 'imgs' [1,128,256,32]: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each)
   constexpr int RING = 5;                        // frames t-4 .. t
   constexpr int DESIRE_HIST = 100, FEAT_HIST = 96, FEAT_LEN = 512, FEAT_TOKENS = 8;
   // input normalization, applied by loadyuv: (pixel - 127.5) / 63.75
@@ -295,7 +297,7 @@ struct ModelState {
   int in_imgs, in_desire, in_feat, in_traffic;              // thneed input indices
   std::array<float, c2port::OUTPUT_SIZE> raw = {};         // model output
   std::unique_ptr<float[]> ring[2];                        // narrow / wide: RING frames each
-  std::unique_ptr<float[]> imgs;                           // staged model input: narrow t-4, t, wide t-4, t
+  std::unique_ptr<float[]> imgs;                           // staged model input 'imgs', 4 * FRAME_SIZE floats
   int ring_head = 0;
   std::array<float, c2port::DESIRE_HIST * DESIRE_LEN> desire_hist = {};
   std::array<float, c2port::FEAT_HIST * c2port::FEAT_LEN> feat_hist = {};

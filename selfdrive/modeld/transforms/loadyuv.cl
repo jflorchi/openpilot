@@ -53,3 +53,11 @@ __kernel void copy(__global float8 * inout,
   const int gid = get_global_id(0);
   inout[gid] = inout[gid + in_offset / 8];
 }
+
+// planar (y0 y1 y2 y3 u v, UV_SIZE each) -> per pixel 8 floats (the 6 channels + 2 zeros), for channel-last models
+__kernel void to_hwc8(__global const float * in,
+                      __global float8 * out)
+{
+  const int p = get_global_id(0);
+  out[p] = (float8)(in[p], in[UV_SIZE + p], in[2*UV_SIZE + p], in[3*UV_SIZE + p], in[4*UV_SIZE + p], in[5*UV_SIZE + p], 0.0f, 0.0f);
+}
