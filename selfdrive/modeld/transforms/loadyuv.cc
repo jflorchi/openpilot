@@ -4,7 +4,8 @@
 #include <cstdio>
 #include <cstring>
 
-void loadyuv_init(LoadYUVState* s, cl_context ctx, cl_device_id device_id, int width, int height) {
+void loadyuv_init(LoadYUVState* s, cl_context ctx, cl_device_id device_id, int width, int height,
+                  float scale, float offset) {
   memset(s, 0, sizeof(*s));
 
   s->width = width;
@@ -13,8 +14,8 @@ void loadyuv_init(LoadYUVState* s, cl_context ctx, cl_device_id device_id, int w
   char args[1024];
   snprintf(args, sizeof(args),
            "-cl-fast-relaxed-math -cl-denorms-are-zero "
-           "-DTRANSFORMED_WIDTH=%d -DTRANSFORMED_HEIGHT=%d",
-           width, height);
+           "-DTRANSFORMED_WIDTH=%d -DTRANSFORMED_HEIGHT=%d -DINPUT_SCALE=%.9ef -DINPUT_OFFSET=%.9ef",
+           width, height, scale, offset);
   cl_program prg = cl_program_from_file(ctx, device_id, "transforms/loadyuv.cl", args);
 
   s->loadys_krnl = CL_CHECK_ERR(clCreateKernel(prg, "loadys", &err));

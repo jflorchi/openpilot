@@ -21,11 +21,35 @@ void Thneed::load(const char *filename) {
   map<cl_mem, cl_mem> real_mem;
   real_mem[NULL] = NULL;
 
+  // tinygrad-compiled thneeds list their inputs/outputs by name and use standalone images. SNPE-recorded thneeds don't,
+  // and may alias images with buffers, so they keep the buffer-backed path below.
+  const bool named_io = !jdat["inputs"].array_items().empty();
+
   int ptr = sizeof(int)+jsz;
   for (auto &obj : jdat["objects"].array_items()) {
     auto mobj = obj.object_items();
     int sz = mobj["size"].int_value();
     cl_mem clbuf = NULL;
+
+    if (named_io && mobj["arg_type"] == "image2d_t" && mobj["buffer_id"].string_value().empty()) {
+      // native (tiled) image: ~20% faster on the Adreno 530 than an image over a linear buffer
+      cl_image_format format = {CL_RGBA, CL_HALF_FLOAT};
+      cl_image_desc desc = {0};
+      desc.image_type = CL_MEM_OBJECT_IMAGE2D;
+      desc.image_width = mobj["width"].int_value();
+      desc.image_height = mobj["height"].int_value();
+      clbuf = clCreateImage(context, CL_MEM_READ_WRITE, &format, &desc, NULL, NULL);
+      assert(clbuf != NULL);
+      if (mobj["needs_load"].bool_value()) {
+        size_t origin[3] = {0, 0, 0};
+        size_t region[3] = {desc.image_width, desc.image_height, 1};
+        size_t row_pitch = mobj["row_pitch"].int_value();
+        CL_CHECK(clEnqueueWriteImage(command_queue, clbuf, CL_TRUE, origin, region, row_pitch, 0, &buf[ptr], 0, NULL, NULL));
+        ptr += sz;
+      }
+      real_mem[*(cl_mem*)(mobj["id"].string_value().data())] = clbuf;
+      continue;
+    }
 
     if (mobj["buffer_id"].string_value().size() > 0) {
       // image buffer must already be allocated
@@ -36,6 +60,10 @@ void Thneed::load(const char *filename) {
         //printf("loading %p %d @ 0x%X\n", clbuf, sz, ptr);
         clbuf = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, sz, &buf[ptr], NULL);
         ptr += sz;
+      } else if (named_io) {
+        // zero-initialized, as tinygrad assumes
+        vector<char> zeros(sz, 0);
+        clbuf = clCreateBuffer(context, CL_MEM_COPY_HOST_PTR | CL_MEM_READ_WRITE, sz, zeros.data(), NULL);
       } else {
         clbuf = clCreateBuffer(context, CL_MEM_READ_WRITE, sz, NULL, NULL);
       }
@@ -103,7 +131,28 @@ void Thneed::load(const char *filename) {
     kq.push_back(kk);
   }
 
+  if (named_io) {
+    for (auto &obj : jdat["inputs"].array_items()) {
+      cl_mem mem = real_mem[*(cl_mem*)(obj["buffer_id"].string_value().data())];
+      size_t sz = obj["size"].int_value();
+      // not mapped: named inputs are written with write_inputs (clEnqueueWriteBuffer), see thneed.cc
+      input_clmem.push_back(mem);
+      input_sizes.push_back(sz);
+      inputs.push_back(nullptr);
+      input_names.push_back(obj["name"].string_value());
+      if (debug >= 1) printf("input %s: %zu bytes\n", input_names.back().c_str(), sz);
+    }
+    output = real_mem[*(cl_mem*)(jdat["outputs"].array_items()[0]["buffer_id"].string_value().data())];
+  }
+
   clFinish(command_queue);
+}
+
+int Thneed::input_index(const string &name) const {
+  for (int i = 0; i < input_names.size(); i++) {
+    if (input_names[i] == name) return i;
+  }
+  return -1;
 }
 
 void Thneed::save(const char *filename, bool save_binaries) {

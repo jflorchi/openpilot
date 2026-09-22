@@ -256,7 +256,18 @@ void Thneed::copy_inputs(float **finputs) {
   //cl_int ret;
   for (int idx = 0; idx < inputs.size(); ++idx) {
     if (debug >= 1) printf("copying %lu -- %p -> %p\n", input_sizes[idx], finputs[idx], inputs[idx]);
-    if (finputs[idx] != NULL) memcpy(inputs[idx], finputs[idx], input_sizes[idx]);
+    if (finputs[idx] != NULL) {
+      assert(inputs[idx] != nullptr);  // named (tinygrad) inputs aren't mapped: use write_inputs
+      memcpy(inputs[idx], finputs[idx], input_sizes[idx]);
+    }
+  }
+}
+
+void Thneed::write_inputs(float **finputs) {
+  // A memcpy into the mapped input (copy_inputs) is only coherent when the recorded ioctls include the buffer's cache
+  // sync, as in SNPE-recorded thneeds. Tinygrad-compiled thneeds replay stale inputs that way, so go through the driver.
+  for (int idx = 0; idx < inputs.size(); ++idx) {
+    if (finputs[idx] != NULL) CL_CHECK(clEnqueueWriteBuffer(command_queue, input_clmem[idx], CL_TRUE, 0, input_sizes[idx], finputs[idx], 0, NULL, NULL));
   }
 }
 

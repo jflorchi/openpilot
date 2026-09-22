@@ -9,8 +9,9 @@
 #include "common/mat.h"
 #include "common/timing.h"
 
-ModelFrame::ModelFrame(cl_device_id device_id, cl_context context) {
+ModelFrame::ModelFrame(cl_device_id device_id, cl_context context, float input_scale, float input_offset) {
   input_frames = std::make_unique<float[]>(buf_size);
+  single_frame = std::make_unique<float[]>(MODEL_FRAME_SIZE);
 
   q = CL_CHECK_ERR(clCreateCommandQueue(context, device_id, 0, &err));
   y_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, MODEL_WIDTH * MODEL_HEIGHT, NULL, &err));
@@ -19,7 +20,7 @@ ModelFrame::ModelFrame(cl_device_id device_id, cl_context context) {
   net_input_cl = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE, MODEL_FRAME_SIZE * sizeof(float), NULL, &err));
 
   transform_init(&transform, context, device_id);
-  loadyuv_init(&loadyuv, context, device_id, MODEL_WIDTH, MODEL_HEIGHT);
+  loadyuv_init(&loadyuv, context, device_id, MODEL_WIDTH, MODEL_HEIGHT, input_scale, input_offset);
 }
 
 float* ModelFrame::prepare(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection, cl_mem *output) {
@@ -40,6 +41,15 @@ float* ModelFrame::prepare(cl_mem yuv_cl, int frame_width, int frame_height, con
     clFinish(q);
     return NULL;
   }
+}
+
+const float* ModelFrame::prepare_single(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection) {
+  transform_queue(&this->transform, q,
+                  yuv_cl, frame_width, frame_height,
+                  y_cl, u_cl, v_cl, MODEL_WIDTH, MODEL_HEIGHT, projection);
+  loadyuv_queue(&loadyuv, q, y_cl, u_cl, v_cl, net_input_cl);
+  CL_CHECK(clEnqueueReadBuffer(q, net_input_cl, CL_TRUE, 0, MODEL_FRAME_SIZE * sizeof(float), single_frame.get(), 0, nullptr, nullptr));
+  return single_frame.get();
 }
 
 ModelFrame::~ModelFrame() {

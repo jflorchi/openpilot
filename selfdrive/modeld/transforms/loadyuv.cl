@@ -1,5 +1,13 @@
 #define UV_SIZE ((TRANSFORMED_WIDTH/2)*(TRANSFORMED_HEIGHT/2))
 
+// optional affine normalization of the loaded pixel values (out = pixel * INPUT_SCALE + INPUT_OFFSET)
+#ifndef INPUT_SCALE
+#define INPUT_SCALE 1.0f
+#endif
+#ifndef INPUT_OFFSET
+#define INPUT_OFFSET 0.0f
+#endif
+
 __kernel void loadys(__global uchar8 const * const Y,
                      __global float * out,
                      int out_offset)
@@ -10,7 +18,7 @@ __kernel void loadys(__global uchar8 const * const Y,
     const int ox = ois % TRANSFORMED_WIDTH;
 
     const uchar8 ys = Y[gid];
-    const float8 ysf = convert_float8(ys);
+    const float8 ysf = convert_float8(ys) * INPUT_SCALE + INPUT_OFFSET;
 
     // 02
     // 13
@@ -35,7 +43,7 @@ __kernel void loaduv(__global uchar8 const * const in,
 {
   const int gid = get_global_id(0);
   const uchar8 inv = in[gid];
-  const float8 outv  = convert_float8(inv);
+  const float8 outv  = convert_float8(inv) * INPUT_SCALE + INPUT_OFFSET;
   out[gid + out_offset / 8] = outv;
 }
 

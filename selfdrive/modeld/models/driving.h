@@ -15,6 +15,9 @@
 #include "common/util.h"
 #include "selfdrive/modeld/models/commonmodel.h"
 #include "selfdrive/modeld/runners/run.h"
+#ifdef C2PORT
+#include "selfdrive/modeld/thneed/thneed.h"
+#endif
 
 constexpr int DESIRE_LEN = 8;
 constexpr int DESIRE_PRED_LEN = 4;
@@ -251,6 +254,28 @@ constexpr int OUTPUT_SIZE = sizeof(ModelOutput) / sizeof(float);
 #endif
 constexpr int NET_OUTPUT_SIZE = OUTPUT_SIZE + TEMPORAL_SIZE;
 
+#ifdef C2PORT
+// Current upstream supercombo ported to the comma two (see c2port/README.md). The model has no recurrent state;
+// modeld keeps its history buffers. Output layout (floats), from the model's output_slices metadata:
+namespace c2port {
+  constexpr int OUTPUT_SIZE = 2576;
+  constexpr int META = 0, DESIRE_PRED = 55, POSE = 87, LANE_LINES = 117, LANE_LINES_PROB = 645, ROAD_EDGES = 653,
+                LEAD = 917, LEAD_PROB = 1061, HIDDEN = 1064, PLAN = 1576, DESIRE_STATE = 2566;
+  constexpr int FRAME_SIZE = 6 * 128 * 256;      // one camera frame in the model's 6-channel YUV layout
+  constexpr int RING = 5;                        // frames t-4 .. t
+  constexpr int DESIRE_HIST = 100, FEAT_HIST = 96, FEAT_LEN = 512, FEAT_TOKENS = 8;
+  // input normalization, applied by loadyuv: (pixel - 127.5) / 63.75
+  constexpr float INPUT_SCALE = 1.0f / 63.75f, INPUT_OFFSET = -127.5f / 63.75f;
+
+  // new lead layout: 3 time offsets x 6 steps x (x, y, v, a), means then log-stds; stored after the old ModelOutput
+  struct Leads {
+    std::array<float, LEAD_MHP_SELECTION * LEAD_TRAJ_LEN * LEAD_PRED_DIM> mean;
+    std::array<float, LEAD_MHP_SELECTION * LEAD_TRAJ_LEN * LEAD_PRED_DIM> std;
+    std::array<float, LEAD_MHP_SELECTION> prob;
+  };
+}
+#endif
+
 // TODO: convert remaining arrays to std::array and update model runners
 struct ModelState {
   ModelFrame *frame;
@@ -264,7 +289,23 @@ struct ModelState {
 #ifdef TRAFFIC_CONVENTION
   float traffic_convention[TRAFFIC_CONVENTION_LEN] = {};
 #endif
+#ifdef C2PORT
+  std::unique_ptr<Thneed> thneed;
+  bool recorded = false;
+  int in_imgs, in_desire, in_feat, in_traffic;              // thneed input indices
+  std::array<float, c2port::OUTPUT_SIZE> raw = {};         // model output
+  std::unique_ptr<float[]> ring[2];                        // narrow / wide: RING frames each
+  std::unique_ptr<float[]> imgs;                           // staged model input: narrow t-4, t, wide t-4, t
+  int ring_head = 0;
+  std::array<float, c2port::DESIRE_HIST * DESIRE_LEN> desire_hist = {};
+  std::array<float, c2port::FEAT_HIST * c2port::FEAT_LEN> feat_hist = {};
+  std::array<float, 25 * DESIRE_LEN> desire_tokens = {};
+  std::array<float, c2port::FEAT_TOKENS * c2port::FEAT_LEN> feat_tokens = {};
+#endif
 };
+#ifdef C2PORT
+static_assert(sizeof(c2port::Leads) <= TEMPORAL_SIZE * sizeof(float), "c2port leads live in the unused recurrent tail");
+#endif
 
 void model_init(ModelState* s, cl_device_id device_id, cl_context context);
 ModelOutput *model_eval_frame(ModelState* s, VisionBuf* buf, VisionBuf* buf_wide,

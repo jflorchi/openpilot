@@ -99,7 +99,9 @@ class Thneed {
     vector<cl_mem> input_clmem;
     vector<void *> inputs;
     vector<size_t> input_sizes;
+    vector<string> input_names;  // set when the file names its inputs (tinygrad-compiled thneeds)
     cl_mem output = NULL;
+    int input_index(const string &name) const;
 
     cl_context context = NULL;
     cl_command_queue command_queue;
@@ -117,6 +119,7 @@ class Thneed {
     // all CL kernels
     void find_inputs_outputs();
     void copy_inputs(float **finputs);
+    void write_inputs(float **finputs);  // via clEnqueueWriteBuffer: coherent for replayed (recorded) execution
     void copy_output(float *foutput);
     cl_int clexec();
     vector<shared_ptr<CLQueuedKernel> > kq;

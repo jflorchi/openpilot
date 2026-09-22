@@ -40,6 +40,11 @@ if arch == "aarch64" or arch == "larch64":
     dlsym_offset = get_dlsym_offset()
     lenv['CXXFLAGS'].append("-DUSE_THNEED")
     lenv['CXXFLAGS'].append(f"-DDLSYM_OFFSET={dlsym_offset}")
+
+    # current upstream supercombo ported to the comma two (selfdrive/modeld/c2port): enabled by installing its thneed,
+    # disabled by removing it and rebuilding
+    if os.path.isfile(File("models/supercombo_c2port.thneed").abspath):
+      lenv['CXXFLAGS'].append("-DC2PORT")
 else:
   libs += ['pthread']
 
