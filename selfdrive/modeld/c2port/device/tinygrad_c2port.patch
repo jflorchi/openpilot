@@ -1,0 +1,230 @@
+diff --git a/accel/opencl/ops_opencl.py b/accel/opencl/ops_opencl.py
+index c0152f2a9..b12705049 100644
+--- a/accel/opencl/ops_opencl.py
++++ b/accel/opencl/ops_opencl.py
+@@ -20,6 +20,15 @@ def load(x):
+ CONV_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/conv.cl')
+ MATMUL_SRC = load(pathlib.Path(__file__).resolve().parent.parent.parent / 'accel/opencl/matmul.cl')
+ 
++# c2port: the Adreno 530 rounds toward zero when write_imagef stores into a CL_HALF_FLOAT image (measured: 100% RTZ).
++# That bias compounds through the network (~13% output error), so with FLOAT16 every image write rounds to nearest.
++RTE_PREFIX = """#pragma OPENCL EXTENSION cl_khr_fp16 : enable
++inline void write_imageh_rte(write_only image2d_t im, int2 l, float4 v) { write_imageh(im, l, convert_half4_rte(v)); }
++"""
++def image_write_rte(src:str) -> str:
++  return RTE_PREFIX + src.replace("write_imagef(", "write_imageh_rte(") if int(os.getenv("FLOAT16", 0)) else src
++CONV_SRC, MATMUL_SRC = image_write_rte(CONV_SRC), image_write_rte(MATMUL_SRC)
++
+ class ECL(CL):
+   @staticmethod
+   def image(shape):
+@@ -53,6 +62,11 @@ def get_replacements(prg_src:str, opencl_type:List[str]) -> Dict[str, str]:
+     replacements["//ARGS"] = ","+','.join(opencl_type)
+   return replacements
+ 
++def cl_float(v) -> str:
++  """float32-exact OpenCL float literal (%f kept only 6 decimals, %g can drop the decimal point)."""
++  s = "%.9g" % v
++  return (s if any(c in s for c in ".en") else s + ".0") + "f"
++
+ def get_getters(ewbufs, ret):
+   fakebufs = []
+   ewtypes = []
+@@ -72,12 +86,19 @@ def get_getters(ewbufs, ret):
+       # use float4
+       ewtypes.append(f"__global const float4 *{name}_g")
+       getters.append(f"inline float4 get4_{name}(__global const float4 *x, const sampler_t smp, int2 loc, int gid) {{ return x[gid/4]; }}")
+-    elif UNSAFE_FLOAT4:
++    elif buf.is_image():
++      # c2port: image input in a different layout/view than the output. The view getter for images takes
++      # (smp, image, gid), so read it elementwise through that instead of the float* fallback below.
++      getters.append(view)
++      ewtypes.append(f"read_only image2d_t {name}_g")
++      getters.append(f"inline float4 get4_{name}(read_only image2d_t x, const sampler_t smp, int2 loc, int gid) {{"+
++        f"return (float4)(get_{name}(smp,x,gid+0), get_{name}(smp,x,gid+1), get_{name}(smp,x,gid+2), get_{name}(smp,x,gid+3)); }}")
++    elif UNSAFE_FLOAT4 and buf._backing is not None:
+       # aggressive constant folding
+       fakebufs.append(name)
+       prt = buf._backing.reshape((-1, 4))
+       cc = []
+-      for ii in range(prt.shape[0]): cc.append("(float4)(%ff, %ff, %ff, %ff)" % (prt[ii][0], prt[ii][1], prt[ii][2], prt[ii][3]))
++      for ii in range(prt.shape[0]): cc.append("(float4)(%s, %s, %s, %s)" % tuple(cl_float(v) for v in prt[ii][:4]))  # c2port: %f dropped digits
+       getters.append(f"const __constant float4 const_{name}[] = {{"+', '.join(cc)+"};")
+       getters.append(f"inline float4 get4_{name}(int gid) {{"+
+         "int idx = gid;"+buf.st.expr()+";"+
+@@ -157,7 +178,7 @@ class OpenCLBuffer(GPUBuffer):
+       if self._buf is not None:
+         assert prod(self.shape) == prod(self._image.shape)*4
+         #print(f"converting {self.shape} to image with shape {self._image.shape}")
+-        CLProgram("to_image", """
++        CLProgram("to_image", image_write_rte("""
+           __kernel void to_image(
+               write_only image2d_t out,
+               __global const float4 *in) {
+@@ -167,7 +188,7 @@ class OpenCLBuffer(GPUBuffer):
+             int W = get_image_width(out);
+             write_imagef(out, l, in[l.y*W + l.x]);
+           }
+-        """)(self._image.shape, None, self._image, self._buf.cl)
++        """))(self._image.shape, None, self._image, self._buf.cl)
+       self._buf = None
+     return self._image
+ 
+@@ -203,6 +224,14 @@ class OpenCLBuffer(GPUBuffer):
+     w = [x for x in bufs if x[0] == "weight"][0][1]
+     ewbufs = [x for x in bufs if x[0] not in ["input", "weight"]]
+ 
++    # c2port: with OPT>=2 an elementwise op can be fused onto a conv through a pure (order-preserving) reshape, e.g. a
++    # 1x1 conv used as a matmul, whose output then has an NCHW shape like (1, 1024, 1, 1). Back it with an image in the
++    # conv's layout; flat element order is identical, and readers index images by flat position.
++    if ret._image is None and not (len(ret.shape) == 3 and ret.shape[2] == 4):
++      assert prod(ret.shape) == prod(C.out_shape), f"fused conv output {ret.shape} doesn't match conv layout {C.out_shape}"
++      ret._image = ECL.image(shape=(C.out_shape[1], C.out_shape[0]))
++      ret._buf = None
++
+     if (x,w) in OpenCLBuffer.seen:
+       print("WARNING: recomputing CONV with", x, w)
+     OpenCLBuffer.seen.add((x,w))
+diff --git a/extra/onnx.py b/extra/onnx.py
+index 44cbb1801..e3470c8e8 100644
+--- a/extra/onnx.py
++++ b/extra/onnx.py
+@@ -22,6 +22,8 @@ def get_run_onnx(onnx_model):
+     elif a.type == 4: return buffer_parse(a.t)  # TENSOR
+     elif a.type == 2: return int(a.i)
+     elif a.type == 1: return float(a.f)
++    elif a.type == 3: return a.s.decode()
++    elif a.type == 6: return tuple(float(x) for x in a.floats)
+     else: raise Exception(f"can't parse {a.type} {a}")
+   def attribute_to_dict(a): return {x.name:attribute_parse(x) for x in a}
+ 
+@@ -75,7 +77,9 @@ def get_run_onnx(onnx_model):
+       elif n.op_type == "MatMul": ret = inp[0].matmul(inp[1])
+       # one liners
+       elif n.op_type == "Elu": ret = inp[0].elu(alpha=opt['alpha'])
+-      elif n.op_type == "Clip": ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt['min'], opt['max'])))
++      elif n.op_type == "Clip":
++        if len(inp) == 2: ret = (inp[0] - inp[1]).relu() + inp[1]   # min only
++        else: ret = inp[0].clip(*(inp[1:] if len(inp) > 1 else (opt['min'], opt['max'])))
+       elif n.op_type == "Concat": ret = inp[0].cat(*inp[1:], dim=opt['axis'])
+       elif n.op_type == "Flatten": ret = inp[0].flatten(opt['axis'] if 'axis' in opt else 0)
+       elif n.op_type == "Transpose": ret = inp[0].permute(order=opt['perm'])
+@@ -99,15 +103,28 @@ def get_run_onnx(onnx_model):
+         if conv_count == MAX_CONVS:
+           ret.numpy()
+           break
+-      elif n.op_type in ["Add", "Sub", "Mul"]:
+-        # TODO: add this to tinygrad? i don't think it's in torch
+-        if len(inp[0].shape) != len(inp[1].shape) and prod(inp[0].shape) == prod(inp[1].shape):
+-          inp[1] = inp[1].reshape(inp[0].shape)
+-        # TODO: is this right?
+-        if 'broadcast' in opt: inp[1] = inp[1].reshape([-1 if i == opt['broadcast'] else 1 for i in range(len(inp[0].shape))])
++      elif n.op_type in ["Add", "Sub", "Mul", "Div"]:
++        # ONNX/numpy broadcasting: align trailing dims (tinygrad's broadcasted pads on the right)
++        r = max(len(inp[0].shape), len(inp[1].shape))
++        inp = [t.reshape(shape=[1]*(r-len(t.shape)) + list(t.shape)) if len(t.shape) < r else t for t in inp[:2]]
+         if n.op_type == "Add": ret = inp[0] + inp[1]
+         if n.op_type == "Sub": ret = inp[0] - inp[1]
+         if n.op_type == "Mul": ret = inp[0] * inp[1]
++        if n.op_type == "Div": ret = inp[0].div(inp[1])
++      elif n.op_type == "Identity": ret = inp[0]
++      elif n.op_type == "Sqrt": ret = inp[0].sqrt()
++      elif n.op_type in ["ReduceMean", "ReduceSum"]:
++        fxn = inp[0].mean if n.op_type == "ReduceMean" else inp[0].sum
++        ret = fxn(axis=tuple(opt['axes']), keepdim=bool(opt.get('keepdims', 1)))
++      elif n.op_type == "Reshape":
++        shp = [int(x) for x in tensors[n.input[1]].numpy().reshape(-1)]
++        shp = [inp[0].shape[i] if v == 0 else v for i, v in enumerate(shp)]
++        if -1 in shp: shp[shp.index(-1)] = prod(inp[0].shape) // -prod(shp)
++        ret = inp[0].reshape(shape=shp)
++      elif n.op_type == "Unsqueeze":
++        shp = list(inp[0].shape)
++        for a in sorted(opt['axes']): shp.insert(a if a >= 0 else a + len(shp) + 1, 1)
++        ret = inp[0].reshape(shape=shp)
+       elif n.op_type == "Split":
+         i = 0
+         arg = [(0,x) for x in inp[0].shape]
+@@ -131,8 +148,17 @@ def get_run_onnx(onnx_model):
+         #ret = ret.conv2d(w, stride=opt['strides'])
+       elif n.op_type == "Slice":
+         arg = [(0,x) for x in inp[0].shape]
+-        assert len(opt['axes']) == 1
+-        arg[opt['axes'][0]] = (opt['starts'][0], opt['ends'][0])
++        if len(n.input) > 1:  # opset >= 10: starts/ends/axes/steps are inputs
++          st, en = [int(x) for x in tensors[n.input[1]].numpy()], [int(x) for x in tensors[n.input[2]].numpy()]
++          ax = [int(x) for x in tensors[n.input[3]].numpy()] if len(n.input) > 3 else list(range(len(st)))
++          assert len(n.input) <= 4 or all(int(x) == 1 for x in tensors[n.input[4]].numpy())
++          for a, s0, e0 in zip(ax, st, en):
++            dim = inp[0].shape[a]
++            s0 = s0 + dim if s0 < 0 else min(s0, dim); e0 = e0 + dim if e0 < 0 else min(e0, dim)
++            arg[a] = (s0, e0)
++        else:
++          assert len(opt['axes']) == 1
++          arg[opt['axes'][0]] = (opt['starts'][0], opt['ends'][0])
+         ret = inp[0].slice(arg = arg)
+       else:
+         print("UNSUPPORTED", n.op_type, n.input, n.output)
+diff --git a/openpilot/compile.py b/openpilot/compile.py
+index 743b72725..30ec6a26c 100644
+--- a/openpilot/compile.py
++++ b/openpilot/compile.py
+@@ -8,7 +8,7 @@ import os
+ import time
+ import io
+ 
+-os.environ['OPT'] = '99'
++os.environ.setdefault('OPT', '99')  # c2port: overridable; OPT>=2 fusions break on the Adreno 530
+ if os.getenv("GPU", None) is None:
+   os.environ['OPENCL'] = '1'
+ 
+@@ -29,13 +29,14 @@ OPENPILOT_MODEL = "https://github.com/commaai/openpilot/raw/ea449f1fe0bbff0eff5b
+ 
+ np.random.seed(1337)
+ def get_random_input_tensors():
++  # comma two port of the current supercombo (host-side history buffers, see make_c2_onnx.py)
++  feat = np.random.randn(8, 512)  # 2D policy (make_policy_2d.py)
+   np_inputs = {
+-    "input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
+-    "big_input_imgs": np.random.randn(*(1, 12, 128, 256))*256,
+-    "desire": np.zeros((1, 8)),
++    "imgs": np.random.rand(1, 24, 128, 256)*255,
++    "desire_tokens": np.zeros((1, 200)),
++    "feat_hist": feat / np.linalg.norm(feat, axis=-1, keepdims=True),  # history features are unit norm
+     "traffic_convention": np.array([[1., 0.]]),
+-    "initial_state": np.random.randn(*(1, 512))
+-    #"initial_state": np.zeros((1, 768))
++    "action_t": np.array([[0.275, 0.525]]),
+   }
+ 
+   #import pickle
+@@ -221,10 +222,17 @@ def compile(input, output_fn):
+     #  jdat['programs'][self.name] = {"src": self.prg, "options": ' '.join(self.options)}
+ 
+     if self.name not in saved_binaries:
+-      binary = self.clprogram.get_info(cl.program_info.BINARIES)
+-      assert len(binary) == 1
+-      jdat['binaries'].append({"name":self.name, "length":len(binary[0])})
+-      binaries.append(binary[0])
++      if int(os.getenv("SAVE_SOURCE", 0)):
++        # c2port: the Adreno 530 driver fails clGetProgramInfo(BINARIES), so ship source. Thneed::load builds programs
++        # without options, so the -D build options become #defines.
++        assert all(o.startswith("-D") for o in self.options), self.options
++        defines = ''.join("#define " + o[2:].replace("=", " ", 1) + "\n" for o in self.options)
++        jdat['programs'][self.name] = defines + self.prg
++      else:
++        binary = self.clprogram.get_info(cl.program_info.BINARIES)
++        assert len(binary) == 1
++        jdat['binaries'].append({"name":self.name, "length":len(binary[0])})
++        binaries.append(binary[0])
+       saved_binaries.add(self.name)
+ 
+     targs, args_size = [], []
+@@ -316,7 +324,7 @@ def compile(input, output_fn):
+     #"size": v.lazydata.realized.cl.size,
+     "size": prod(v.shape)*4,
+     "name": k
+-  } for k,v in inputs.items()][::-1]
++  } for k,v in inputs.items() if hasattr(v.lazydata.realized.cl, "global_id")][::-1]  # c2port: skip inputs no kernel reads (action_t)
+   print(jdat['inputs'])
+   
+   print(f"saving {len([x for x in jdat['objects'] if x['needs_load']])} objects")
