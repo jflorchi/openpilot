@@ -102,6 +102,15 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
     }
     addItem(toggle);
   }
+
+  // Laneless mode selector. Picked up live by plannerd, so it stays editable
+  // while onroad (unlike the toggles above, which lock when driving).
+  addItem(new ButtonParamControl("LanelessMode", "\U0001f96c Laneless Mode \U0001f96c",
+                                 "Lane Lines: openpilot centers using the detected lane lines.\n"
+                                 "Laneless: openpilot ignores lane lines and drives how it thinks a human would.\n"
+                                 "Auto: openpilot switches between the two based on how confident the model is in the lane lines.",
+                                 "../assets/offroad/icon_road.png",
+                                 {"Lane Lines", "Laneless", "Auto"}));
 }
 
 DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {

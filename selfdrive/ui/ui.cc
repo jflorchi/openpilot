@@ -194,7 +194,7 @@ static void update_model(UIState *s, const cereal::ModelDataV2::Reader &model) {
   } else {
     lead_d_filter_valid = false;
   }
-  update_line_data(s, path_filter, 0.9, 1.22, &scene.track_vertices, max_distance, false);
+  update_line_data(s, path_filter, scene.end_to_end ? 0.9 : 0.5, 1.22, &scene.track_vertices, max_distance, false);
 }
 
 static void update_sockets(UIState *s) {
@@ -291,6 +291,11 @@ void ui_update_params(UIState *s) {
 }
 
 void UIState::updateStatus() {
+  // reflect the actual laneless decision (manual or automatic) in the path color
+  if (scene.started && sm->updated("lateralPlan")) {
+    scene.end_to_end = !(*sm)["lateralPlan"].getLateralPlan().getUseLaneLines();
+  }
+
   if (scene.started && sm->updated("controlsState")) {
     auto controls_state = (*sm)["controlsState"].getControlsState();
     auto alert_status = controls_state.getAlertStatus();
@@ -322,7 +327,7 @@ UIState::UIState(QObject *parent) : QObject(parent) {
   sm = std::make_unique<SubMaster, const std::initializer_list<const char *>>({
     "modelV2", "controlsState", "liveCalibration", "radarState", "deviceState", "roadCameraState",
     "pandaStates", "carParams", "driverMonitoringState", "sensorEvents", "carState", "liveLocationKalman",
-    "wideRoadCameraState", "managerState",
+    "wideRoadCameraState", "managerState", "lateralPlan",
   });
 
   Params params;

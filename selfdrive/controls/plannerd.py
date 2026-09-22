@@ -17,10 +17,12 @@ def plannerd_thread(sm=None, pm=None):
   CP = car.CarParams.from_bytes(params.get("CarParams", block=True))
   cloudlog.info("plannerd got CarParams: %s", CP.carName)
 
-  use_lanelines = False
+  # LanelessMode: 0 = lanelines, 1 = laneless, 2 = auto (confidence-based)
+  laneless_mode = int(params.get('LanelessMode', encoding='utf8') or 1)
+  use_lanelines = laneless_mode == 0
   wide_camera = params.get_bool('WideCameraOnly') if TICI else False
 
-  cloudlog.event("e2e mode", on=use_lanelines)
+  cloudlog.event("e2e mode", on=not use_lanelines)
 
   longitudinal_planner = Planner(CP)
   lateral_planner = LateralPlanner(CP, use_lanelines=use_lanelines, wide_camera=wide_camera)
@@ -32,8 +34,22 @@ def plannerd_thread(sm=None, pm=None):
   if pm is None:
     pm = messaging.PubMaster(['longitudinalPlan', 'lateralPlan'])
 
+  frame = 0
   while True:
     sm.update()
+
+    # allow the laneless mode to take effect while onroad (checked ~1x/sec)
+    frame += 1
+    if frame % 20 == 0:
+      laneless_mode = int(params.get('LanelessMode', encoding='utf8') or 1)
+      lateral_planner.dynamic_lanelines = laneless_mode == 2
+      # in auto mode lateral_planner picks the mode from laneline confidence;
+      # otherwise the selector decides directly
+      if not lateral_planner.dynamic_lanelines:
+        use_lanelines = laneless_mode == 0
+        if use_lanelines != lateral_planner.use_lanelines:
+          lateral_planner.use_lanelines = use_lanelines
+          cloudlog.event("e2e mode", on=not use_lanelines)
 
     if sm.updated['modelV2']:
       lateral_planner.update(sm)

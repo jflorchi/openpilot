@@ -106,6 +106,10 @@ OffroadHome::OffroadHome(QWidget* parent) : QFrame(parent) {
   header_layout->setContentsMargins(15, 15, 15, 0);
   header_layout->setSpacing(16);
 
+  clock = new QLabel();
+  clock->setObjectName("clock");
+  header_layout->addWidget(clock, 0, Qt::AlignHCenter | Qt::AlignLeft);
+
   date = new QLabel();
   header_layout->addWidget(date, 1, Qt::AlignHCenter | Qt::AlignLeft);
 
@@ -152,9 +156,18 @@ OffroadHome::OffroadHome(QWidget* parent) : QFrame(parent) {
   timer = new QTimer(this);
   timer->callOnTimeout(this, &OffroadHome::refresh);
 
+  // the clock ticks on its own so it stays accurate without doing the
+  // full refresh (which hits params on disk) every second
+  clock_timer = new QTimer(this);
+  clock_timer->callOnTimeout(this, &OffroadHome::updateClock);
+
   setStyleSheet(R"(
     * {
      color: white;
+    }
+    #clock {
+      font-size: 75px;
+      font-weight: 500;
     }
     OffroadHome {
       background-color: black;
@@ -174,14 +187,23 @@ OffroadHome::OffroadHome(QWidget* parent) : QFrame(parent) {
 void OffroadHome::showEvent(QShowEvent *event) {
   refresh();
   timer->start(10 * 1000);
+  updateClock();
+  clock_timer->start(1000);
 }
 
 void OffroadHome::hideEvent(QHideEvent *event) {
   timer->stop();
+  clock_timer->stop();
+}
+
+void OffroadHome::updateClock() {
+  // setText is a no-op when unchanged, so this only repaints once a minute
+  clock->setText(currentTimeStr());
+  date->setText(currentDateStr());
 }
 
 void OffroadHome::refresh() {
-  date->setText(QDateTime::currentDateTime().toString("dddd, MMMM d"));
+  updateClock();
 
   bool updateAvailable = update_widget->refresh();
   int alerts = alerts_widget->refresh();

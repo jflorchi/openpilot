@@ -24,9 +24,12 @@ private:
   void showEvent(QShowEvent *event) override;
   void hideEvent(QHideEvent *event) override;
   void refresh();
+  void updateClock();
 
   QTimer* timer;
+  QTimer* clock_timer;
   QLabel* date;
+  QLabel* clock;
   QStackedLayout* center_layout;
   UpdateAlert *update_widget;
   OffroadAlert* alerts_widget;

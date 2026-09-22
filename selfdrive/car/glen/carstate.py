@@ -9,7 +9,15 @@ from opendbc.can.parser import CANParser
 from selfdrive.car.glen.linked_ring import LinkedRing
 from selfdrive.car.interfaces import CarStateBase
 from selfdrive.car.glen.values import DBC, STEER_THRESHOLD, EPS_SCALE
+from selfdrive.swaglog import cloudlog
 from common.conversions import Conversions as CV
+
+ZSS_SCALE = 0.021973997
+ZSS_MOUNT_OFFSET = 2.41  # ZSS mounting offset vs true center, measured after alignment
+ZSS_STILL_DEG = 1.0  # wheel counts as still within this many deg...
+ZSS_STILL_FRAMES = 50  # ...held for 0.5s at 100Hz
+ZSS_SANITY_DEG = 15.0  # disagreement with the stock sensor that means the ZSS lost its zero
+
 
 class CarState(CarStateBase):
     def __init__(self, CP):
@@ -28,6 +36,9 @@ class CarState(CarStateBase):
         self.acc_type = 1
 
         self.angle_offset = 0.
+        self.zss_offset = None
+        self.zss_still_ref = None
+        self.zss_still_frames = 0
         self.last_time = -1
         self.last_angle = 0
         self.last_rate = 0
@@ -56,13 +67,51 @@ class CarState(CarStateBase):
 
         ret.standstill = ret.vEgoRaw < 0.001
 
-        ret.steeringAngleDeg = cp2.vl["SECONDARY_STEER_ANGLE"]["ANGLE"]
+        zss_angle = cp2.vl["SECONDARY_STEER_ANGLE"]["ANGLE"]
         if cp2.vl["SECONDARY_STEER_ANGLE"]["SIGN"] == 1:
-            ret.steeringAngleDeg = 65535 - ret.steeringAngleDeg
-            ret.steeringAngleDeg = 0 - ret.steeringAngleDeg
-            ret.steeringAngleDeg = ret.steeringAngleDeg * 0.021973997
+            zss_angle = 65535 - zss_angle
+            zss_angle = 0 - zss_angle
+            zss_angle = zss_angle * ZSS_SCALE
         else:
-            ret.steeringAngleDeg = ret.steeringAngleDeg * 0.021973997
+            zss_angle = zss_angle * ZSS_SCALE
+
+        # The ZSS keeps its zero across ignition cycles, so ZSS_MOUNT_OFFSET (measured against true
+        # center after an alignment) is the accurate correction and is what we normally use. It only
+        # re-zeroes if the module loses power, and it zeroes to wherever the wheel is sitting at that
+        # moment -- reconnect it with the wheel turned and the reported angle is off by however far
+        # the wheel was turned.
+        #
+        # So sanity check the constant once, against the stock sensor, while the wheel is holding
+        # still. Agreement means the ZSS zero survived and we keep the aligned constant. Gross
+        # disagreement means it was re-zeroed, and we fall back to borrowing the stock sensor's zero
+        # -- coarser (1.5 deg/count) and only as accurate as the stock sensor, but drivable instead
+        # of hundreds of degrees out.
+        #
+        # The stillness gate matters: the sensors are on different buses at different rates (20Hz vs
+        # 80Hz), so with the wheel turning they disagree by tens of degrees from sampling skew alone.
+        # Checking then would trip the fallback spuriously.
+        stock_angle = cp0.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp0.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
+        if self.zss_offset is None:
+            if self.zss_still_ref is None or abs(zss_angle - self.zss_still_ref) > ZSS_STILL_DEG:
+                self.zss_still_ref = zss_angle
+                self.zss_still_frames = 0
+            else:
+                self.zss_still_frames += 1
+
+            if self.zss_still_frames >= ZSS_STILL_FRAMES and cp0.can_valid and cp2.can_valid:
+                if abs((zss_angle - ZSS_MOUNT_OFFSET) - stock_angle) <= ZSS_SANITY_DEG:
+                    self.zss_offset = ZSS_MOUNT_OFFSET
+                else:
+                    self.zss_offset = zss_angle - stock_angle
+                    cloudlog.error("ZSS lost its zero, falling back to the stock sensor's. "
+                                   "Re-zero it by power cycling the module with the wheel straight. "
+                                   f"zss={zss_angle:.2f} stock={stock_angle:.2f} offset={self.zss_offset:.2f}")
+
+            # sanity check hasn't run yet, so the constant is still unverified
+            ret.steeringAngleDeg = zss_angle - ZSS_MOUNT_OFFSET
+        else:
+            ret.steeringAngleDeg = zss_angle - self.zss_offset
+
         if self.last_time == -1:
             ret.steeringRateDeg = 0  # set to 0 since it isn't moving yet
             self.last_time = round(time.time() * 1000)
@@ -75,9 +124,6 @@ class CarState(CarStateBase):
             ret.steeringRateDeg = cur_angle
             self.last_time = cur_time
         self.last_angle = ret.steeringAngleDeg
-        ret.steeringAngleDeg -= 2.41
-
-        print(ret.steeringAngleDeg)
 
         can_gear = int(cp0.vl["GEAR_PACKET"]["GEAR"])
         ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(can_gear, None))

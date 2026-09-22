@@ -1,5 +1,8 @@
 #include "selfdrive/ui/qt/util.h"
 
+#include <cstdlib>
+#include <ctime>
+
 #include <QApplication>
 #include <QLayoutItem>
 #include <QStyleOption>
@@ -7,6 +10,34 @@
 #include "common/params.h"
 #include "common/swaglog.h"
 #include "selfdrive/hardware/hw.h"
+
+// the device runs on UTC; show wall clock time for where the car lives
+const char *DISPLAY_TZ = "America/Edmonton";
+
+void initTimeZone() {
+  setenv("TZ", DISPLAY_TZ, 1);
+  tzset();
+}
+
+static QString formatLocalTime(const char *fmt) {
+  time_t t = time(nullptr);
+  struct tm lt = {};
+  localtime_r(&t, &lt);
+
+  char buf[64] = {};
+  strftime(buf, sizeof(buf), fmt, &lt);
+  return QString(buf);
+}
+
+QString currentTimeStr() {
+  // %I is zero padded, and a clock reads better without it
+  QString t = formatLocalTime("%I:%M %p");
+  return t.startsWith('0') ? t.mid(1) : t;
+}
+
+QString currentDateStr() {
+  return formatLocalTime("%A, %B %-d");
+}
 
 QString getVersion() {
   static QString version =  QString::fromStdString(Params().get("Version"));

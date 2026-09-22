@@ -1,6 +1,6 @@
 import os
 import requests
-API_HOST = os.getenv('API_HOST', 'https://api.retropilot.org')
+API_HOST = os.getenv('API_HOST', 'https://openpilot.paratek.io')
 
 class CommaApi():
   def __init__(self, token=None):

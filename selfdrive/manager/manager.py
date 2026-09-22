@@ -40,6 +40,7 @@ def manager_init() -> None:
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "1"),
     ("HasAcceptedTerms", "0"),
+    ("LanelessMode", "1"),  # 0 = lanelines, 1 = laneless, 2 = auto
     ("OpenpilotEnabledToggle", "1"),
   ]
   if not PC:

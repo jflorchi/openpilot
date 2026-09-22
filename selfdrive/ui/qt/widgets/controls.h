@@ -1,5 +1,9 @@
 #pragma once
 
+#include <cstdlib>
+#include <vector>
+
+#include <QButtonGroup>
 #include <QFrame>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -131,6 +135,64 @@ public:
 private:
   std::string key;
   Params params;
+};
+
+// widget to select one of several options, storing the chosen index in a param
+class ButtonParamControl : public AbstractControl {
+  Q_OBJECT
+
+public:
+  ButtonParamControl(const QString &param, const QString &title, const QString &desc, const QString &icon,
+                     const std::vector<QString> &button_texts, QWidget *parent = nullptr)
+      : AbstractControl(title, desc, icon, parent) {
+    key = param.toStdString();
+    int value = atoi(params.get(key).c_str());
+
+    button_group = new QButtonGroup(this);
+    button_group->setExclusive(true);
+    for (int i = 0; i < button_texts.size(); i++) {
+      QPushButton *button = new QPushButton(button_texts[i], this);
+      button->setCheckable(true);
+      button->setChecked(i == value);
+      button->setStyleSheet(R"(
+        QPushButton {
+          border-radius: 20px;
+          font-size: 35px;
+          font-weight: 500;
+          height: 100px;
+          padding: 0 25px;
+          color: #E4E4E4;
+          background-color: #393939;
+        }
+        QPushButton:pressed {
+          background-color: #4a4a4a;
+        }
+        QPushButton:checked:enabled {
+          background-color: #33Ab4C;
+        }
+        QPushButton:disabled {
+          color: #33E4E4E4;
+        }
+      )");
+      hlayout->addWidget(button);
+      button_group->addButton(button, i);
+    }
+
+    QObject::connect(button_group, QOverload<int>::of(&QButtonGroup::buttonClicked), [=](int id) {
+      params.put(key, std::to_string(id));
+    });
+  }
+
+  void setEnabled(bool enabled) {
+    for (auto btn : button_group->buttons()) {
+      btn->setEnabled(enabled);
+    }
+  }
+
+private:
+  std::string key;
+  Params params;
+  QButtonGroup *button_group;
 };
 
 class ListWidget : public QWidget {

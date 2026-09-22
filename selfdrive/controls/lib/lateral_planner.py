@@ -13,6 +13,7 @@ from cereal import log
 class LateralPlanner:
   def __init__(self, CP, use_lanelines=True, wide_camera=False):
     self.use_lanelines = use_lanelines
+    self.dynamic_lanelines = False
     self.LP = LanePlanner(wide_camera)
     self.DH = DesireHelper()
 
@@ -59,6 +60,15 @@ class LateralPlanner:
     if self.DH.desire == log.LateralPlan.Desire.laneChangeRight or self.DH.desire == log.LateralPlan.Desire.laneChangeLeft:
       self.LP.lll_prob *= self.DH.lane_change_ll_prob
       self.LP.rll_prob *= self.DH.lane_change_ll_prob
+
+    # Auto laneless: switch on the model's laneline confidence, with hysteresis
+    # to avoid flapping when confidence hovers near the threshold.
+    if self.dynamic_lanelines:
+      lane_confidence = (self.LP.lll_prob + self.LP.rll_prob) / 2.
+      if lane_confidence > 0.5:
+        self.use_lanelines = True
+      elif lane_confidence < 0.3:
+        self.use_lanelines = False
 
     # Calculate final driving path and set MPC costs
     if self.use_lanelines:

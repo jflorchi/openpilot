@@ -126,54 +126,19 @@ PrimeUserWidget::PrimeUserWidget(QWidget* parent) : QWidget(parent) {
 
   primeLayout->addSpacing(60);
 
-  QLabel* commaPrime = new QLabel("retropilot api");
+  QLabel* commaPrime = new QLabel("openpilot api");
   commaPrime->setStyleSheet("font-size: 75px; font-weight: bold;");
   primeLayout->addWidget(commaPrime, 0, Qt::AlignTop);
 
   primeLayout->addSpacing(20);
 
-  QLabel* connectUrl = new QLabel("API.RETROPILOT.ORG");
+  QLabel* connectUrl = new QLabel("OPENPILOT.PARATEK.IO");
   connectUrl->setStyleSheet("font-size: 41px; font-family: Inter SemiBold; color: #A0A0A0;");
   primeLayout->addWidget(connectUrl, 0, Qt::AlignTop);
 
   mainLayout->addWidget(primeWidget);
 
-  // comma points layout
-  QWidget *pointsWidget = new QWidget;
-  pointsWidget->setObjectName("primeWidget");
-  QVBoxLayout *pointsLayout = new QVBoxLayout(pointsWidget);
-  pointsLayout->setMargin(0);
-  pointsWidget->setContentsMargins(60, 50, 60, 50);
-
-  QLabel* commaPoints = new QLabel("RETRO_TOKENS");
-  commaPoints->setStyleSheet("font-size: 41px; font-family: Inter SemiBold;");
-  pointsLayout->addWidget(commaPoints, 0, Qt::AlignTop);
-
-  points = new QLabel("0");
-  points->setStyleSheet("font-size: 91px; font-weight: bold;");
-  pointsLayout->addWidget(points, 0, Qt::AlignTop);
-
-  mainLayout->addWidget(pointsWidget);
-
   mainLayout->addStretch();
-
-  // set up API requests
-  if (auto dongleId = getDongleId()) {
-    QString url = CommaApi::BASE_URL + "/v1/devices/" + *dongleId + "/owner";
-    RequestRepeater *repeater = new RequestRepeater(this, url, "ApiCache_Owner", 6);
-    QObject::connect(repeater, &RequestRepeater::requestDone, this, &PrimeUserWidget::replyFinished);
-  }
-}
-
-void PrimeUserWidget::replyFinished(const QString &response) {
-  QJsonDocument doc = QJsonDocument::fromJson(response.toUtf8());
-  if (doc.isNull()) {
-    qDebug() << "JSON Parse failed on getting points";
-    return;
-  }
-
-  QJsonObject json = doc.object();
-  points->setText(QString::number(json["points"].toInt()));
 }
 
 PrimeAdWidget::PrimeAdWidget(QWidget* parent) : QFrame(parent) {

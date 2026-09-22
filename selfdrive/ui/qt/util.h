@@ -18,6 +18,9 @@ void configFont(QPainter &p, const QString &family, int size, const QString &sty
 void clearLayout(QLayout* layout);
 void setQtSurfaceFormat();
 QString timeAgo(const QDateTime &date);
+void initTimeZone();
+QString currentTimeStr();
+QString currentDateStr();
 void swagLogMessageHandler(QtMsgType type, const QMessageLogContext &context, const QString &msg);
 void initApp(int argc, char *argv[]);
 QWidget* topWidget (QWidget* widget);

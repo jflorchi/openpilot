@@ -11,6 +11,8 @@
 int main(int argc, char *argv[]) {
   setpriority(PRIO_PROCESS, 0, -20);
 
+  initTimeZone();
+
   qInstallMessageHandler(swagLogMessageHandler);
   initApp(argc, argv);
 
