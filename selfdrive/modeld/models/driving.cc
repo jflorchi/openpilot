@@ -48,11 +48,11 @@ void model_init(ModelState* s, cl_device_id device_id, cl_context context) {
   assert(s->thneed->input_sizes[s->in_feat] == s->feat_tokens.size() * sizeof(float));
 
   // frames before the first 5 are all-zero pixels, like the upstream model's zero-initialized image queue
+  std::vector<float> zero_frames(c2port::RING * c2port::FRAME_SIZE, c2port::INPUT_OFFSET);
   for (auto &r : s->ring) {
-    r = std::make_unique<float[]>(c2port::RING * c2port::FRAME_SIZE);
-    std::fill_n(r.get(), c2port::RING * c2port::FRAME_SIZE, c2port::INPUT_OFFSET);
+    r = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, zero_frames.size() * sizeof(float),
+                                    zero_frames.data(), &err));
   }
-  s->imgs = std::make_unique<float[]>(4 * c2port::FRAME_SIZE);
 
   s->traffic_convention[Params().getBool("IsRHD") ? 1 : 0] = 1.0;
   return;
@@ -160,10 +160,8 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
 
   // frames: narrow and wide (the narrow camera again on the comma two), each into its ring at ring_head
   VisionBuf *wide = (wbuf != nullptr) ? wbuf : buf;
-  std::memcpy(s->ring[0].get() + s->ring_head * FRAME_SIZE, s->frame->prepare_single_hwc8(buf->buf_cl, buf->width, buf->height, transform),
-              FRAME_SIZE * sizeof(float));
-  std::memcpy(s->ring[1].get() + s->ring_head * FRAME_SIZE, s->wide_frame->prepare_single_hwc8(wide->buf_cl, wide->width, wide->height, transform_wide),
-              FRAME_SIZE * sizeof(float));
+  s->frame->prepare_hwc8(buf->buf_cl, buf->width, buf->height, transform, s->ring[0], s->ring_head);
+  s->wide_frame->prepare_hwc8(wide->buf_cl, wide->width, wide->height, transform_wide, s->ring[1], s->ring_head);
   const int slot_t = s->ring_head, slot_t4 = (s->ring_head + 1) % RING;  // newest and 4 frames ago
   s->ring_head = (s->ring_head + 1) % RING;
 
@@ -179,15 +177,9 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
     return nullptr;
   }
 
-  // model input 'imgs' [1,128,256,32], channel-last: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each)
-  float *imgs = s->imgs.get();
-  const float *src[4] = {s->ring[0].get() + slot_t4 * FRAME_SIZE, s->ring[0].get() + slot_t * FRAME_SIZE,
-                         s->ring[1].get() + slot_t4 * FRAME_SIZE, s->ring[1].get() + slot_t * FRAME_SIZE};
-  for (int p = 0; p < PIXELS; p++) {
-    for (int f = 0; f < 4; f++) {
-      std::memcpy(imgs + p * 32 + f * 8, src[f] + p * 8, 8 * sizeof(float));
-    }
-  }
+  // model input 'imgs' [1,128,256,32], channel-last: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each),
+  // gathered on the GPU straight into the thneed's input buffer
+  s->frame->gather_hwc8(s->ring[0], s->ring[1], slot_t4, slot_t, slot_t4, slot_t, s->thneed->input_clmem[s->in_imgs]);
 
   // feature history tokens: every 4th of the 96-step history (rows 0, 4, .., 92), the last 8 = rows 64 .. 92,
   // i.e. the features of frames t-32 .. t-4 (taken before this frame's feature is pushed)
@@ -198,7 +190,6 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
   }
 
   std::vector<float*> finputs(s->thneed->inputs.size(), nullptr);
-  finputs[s->in_imgs] = imgs;
   finputs[s->in_desire] = s->desire_tokens.data();
   finputs[s->in_feat] = s->feat_tokens.data();
   finputs[s->in_traffic] = s->traffic_convention;
@@ -226,7 +217,10 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
       FILE *f = fopen(fn, "wb");
       if (f) { fwrite(data, 1, size, f); fclose(f); }
     };
-    dump("imgs", imgs, 4 * FRAME_SIZE * sizeof(float));
+    if (!s->imgs) s->imgs = std::make_unique<float[]>(4 * FRAME_SIZE);
+    CL_CHECK(clEnqueueReadBuffer(s->thneed->command_queue, s->thneed->input_clmem[s->in_imgs], CL_TRUE, 0,
+                                 4 * FRAME_SIZE * sizeof(float), s->imgs.get(), 0, NULL, NULL));
+    dump("imgs", s->imgs.get(), 4 * FRAME_SIZE * sizeof(float));
     dump("desire", s->desire_tokens.data(), sizeof(s->desire_tokens));
     dump("feat", s->feat_tokens.data(), sizeof(s->feat_tokens));
     dump("traffic", s->traffic_convention, sizeof(s->traffic_convention));
@@ -283,6 +277,11 @@ ModelOutput* model_eval_frame(ModelState* s, VisionBuf* buf, VisionBuf* wbuf,
 }
 
 void model_free(ModelState* s) {
+#ifdef C2PORT
+  for (auto &r : s->ring) {
+    if (r != nullptr) CL_CHECK(clReleaseMemObject(r));
+  }
+#endif
   delete s->frame;
 }
 

@@ -296,8 +296,8 @@ struct ModelState {
   bool recorded = false;
   int in_imgs, in_desire, in_feat, in_traffic;              // thneed input indices
   std::array<float, c2port::OUTPUT_SIZE> raw = {};         // model output
-  std::unique_ptr<float[]> ring[2];                        // narrow / wide: RING frames each
-  std::unique_ptr<float[]> imgs;                           // staged model input 'imgs', 4 * FRAME_SIZE floats
+  cl_mem ring[2] = {};                                     // narrow / wide on the GPU: RING frames each
+  std::unique_ptr<float[]> imgs;                           // host copy of the model input 'imgs', only for C2PORT_DUMP
   int ring_head = 0;
   std::array<float, c2port::DESIRE_HIST * DESIRE_LEN> desire_hist = {};
   std::array<float, c2port::FEAT_HIST * c2port::FEAT_LEN> feat_hist = {};
