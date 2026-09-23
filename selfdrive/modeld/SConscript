@@ -40,11 +40,6 @@ if arch == "aarch64" or arch == "larch64":
     dlsym_offset = get_dlsym_offset()
     lenv['CXXFLAGS'].append("-DUSE_THNEED")
     lenv['CXXFLAGS'].append(f"-DDLSYM_OFFSET={dlsym_offset}")
-
-    # current upstream supercombo ported to the comma two (selfdrive/modeld/c2port): enabled by installing its thneed,
-    # disabled by removing it and rebuilding
-    if os.path.isfile(File("models/supercombo_c2port.thneed").abspath):
-      lenv['CXXFLAGS'].append("-DC2PORT")
 else:
   libs += ['pthread']
 
@@ -94,7 +89,16 @@ lenv.Program('_dmonitoringmodeld', [
     "models/dmonitoring.cc",
   ]+common_model, LIBS=libs)
 
-lenv.Program('_modeld', [
-    "modeld.cc",
-    "models/driving.cc",
-  ]+common_model, LIBS=libs)
+modeld_src = [
+  "modeld.cc",
+  "models/driving.cc",
+]
+lenv.Program('_modeld', modeld_src + common_model, LIBS=libs)
+
+# current upstream supercombo ported to the comma two (selfdrive/modeld/c2port), built next to the default model.
+# The modeld launcher runs it when /data/c2port/USE_C2PORT exists; remove that file to go back.
+if use_thneed and arch == "aarch64":
+  c2env = lenv.Clone()
+  c2env['CXXFLAGS'].append("-DC2PORT")
+  c2port_objs = [c2env.Object(os.path.splitext(f)[0] + "_c2port.o", f) for f in modeld_src]
+  c2env.Program('_modeld_c2port', c2port_objs + common_model, LIBS=libs)

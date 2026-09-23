@@ -13,4 +13,23 @@ else
   # PC
   export LD_LIBRARY_PATH="$DIR/../../third_party/snpe/x86_64-linux-clang:$DIR/../../openpilot/third_party/snpe/x86_64:$LD_LIBRARY_PATH"
 fi
+
+# Current upstream supercombo ported to the comma two (selfdrive/modeld/c2port): used while /data/c2port/USE_C2PORT
+# exists. Remove that file to go back to the default model at the next modeld start. If the port crash-loops (3 starts
+# within 60 s), this removes the file itself so manager's next restart runs the default model.
+C2PORT_FLAG=/data/c2port/USE_C2PORT
+C2PORT_LOG=/data/c2port/modeld_launch.log
+if [ -f $C2PORT_FLAG ] && [ -x ./_modeld_c2port ] && [ -f models/supercombo_c2port.thneed ]; then
+  NOW=$(date +%s)
+  { tail -n 2 /data/c2port/c2port_starts 2>/dev/null; echo $NOW; } > /data/c2port/c2port_starts.new
+  mv /data/c2port/c2port_starts.new /data/c2port/c2port_starts
+  RECENT=$(awk -v now=$NOW 'now - $1 < 60' /data/c2port/c2port_starts | wc -l)
+  if [ $RECENT -ge 3 ]; then
+    rm -f $C2PORT_FLAG
+    echo "$(date) c2port started 3 times within 60 s: disabled it, running the default model" >> $C2PORT_LOG
+  else
+    echo "$(date) starting c2port model" >> $C2PORT_LOG
+    exec ./_modeld_c2port
+  fi
+fi
 exec ./_modeld

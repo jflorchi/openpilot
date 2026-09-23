@@ -337,6 +337,9 @@ void Replay::publishFrame(const Event *e) {
 void Replay::stream() {
   cereal::Event::Which cur_which = cereal::Event::Which::INIT_DATA;
   std::unique_lock lk(stream_lock_);
+  // REPLAY_SPEED < 1 slows playback, e.g. so the comma two can decode frames and run modeld on every one
+  const char *speed_env = getenv("REPLAY_SPEED");
+  const double speed = speed_env ? std::max(0.05, atof(speed_env)) : 1.0;
 
   while (true) {
     stream_cv_.wait(lk, [=]() { return exit_ || (events_updated_ && !paused_); });
@@ -370,7 +373,7 @@ void Replay::stream() {
 
       if (cur_which < sockets_.size() && sockets_[cur_which] != nullptr) {
         // keep time
-        long etime = cur_mono_time_ - evt_start_ts;
+        long etime = (cur_mono_time_ - evt_start_ts) / speed;
         long rtime = nanos_since_boot() - loop_start_ts;
         long behind_ns = etime - rtime;
         // if behind_ns is greater than 1 second, it means that an invalid segemnt is skipped by seeking/replaying
