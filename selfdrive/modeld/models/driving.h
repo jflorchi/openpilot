@@ -296,7 +296,7 @@ struct ModelState {
   bool recorded = false;
   int in_imgs, in_desire, in_feat, in_traffic;              // thneed input indices
   std::array<float, c2port::OUTPUT_SIZE> raw = {};         // model output
-  cl_mem ring[2] = {};                                     // narrow / wide on the GPU: RING frames each
+  cl_mem ring[2] = {};                                     // narrow / wide raw pixels on the GPU: RING frames each
   std::unique_ptr<float[]> imgs;                           // host copy of the model input 'imgs', only for C2PORT_DUMP
   int ring_head = 0;
   std::array<float, c2port::DESIRE_HIST * DESIRE_LEN> desire_hist = {};

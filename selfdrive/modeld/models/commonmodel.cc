@@ -42,19 +42,15 @@ float* ModelFrame::prepare(cl_mem yuv_cl, int frame_width, int frame_height, con
   }
 }
 
-void ModelFrame::prepare_hwc8(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection, cl_mem ring_cl, int slot) {
+void ModelFrame::prepare_hwc8(cl_mem yuv_cl, int frame_width, int frame_height, const mat3 &projection,
+                              cl_mem ring_cl, int slot_t, int slot_t4, cl_mem out, int cam) {
   transform_queue(&this->transform, q,
                   yuv_cl, frame_width, frame_height,
                   y_cl, u_cl, v_cl, MODEL_WIDTH, MODEL_HEIGHT, projection);
-  loadyuv_queue(&loadyuv, q, y_cl, u_cl, v_cl, net_input_cl);
-  loadyuv_to_hwc8(&loadyuv, q, net_input_cl, ring_cl, slot);
-  // another queue (the other camera's, or thneed's) reads the ring next
-  clFinish(q);
+  loadyuv_hwc8(&loadyuv, q, y_cl, u_cl, v_cl, ring_cl, slot_t, slot_t4, out, cam);
 }
 
-void ModelFrame::gather_hwc8(cl_mem a, cl_mem b, int a0, int a1, int b0, int b1, cl_mem out) {
-  loadyuv_gather_hwc8(&loadyuv, q, a, b, a0, a1, b0, b1, out);
-  // NOTE: thneed replays on its own context, so the input must be complete before it runs (as in prepare())
+void ModelFrame::finish() {
   clFinish(q);
 }
 

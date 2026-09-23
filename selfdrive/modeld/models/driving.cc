@@ -48,10 +48,9 @@ void model_init(ModelState* s, cl_device_id device_id, cl_context context) {
   assert(s->thneed->input_sizes[s->in_feat] == s->feat_tokens.size() * sizeof(float));
 
   // frames before the first 5 are all-zero pixels, like the upstream model's zero-initialized image queue
-  std::vector<float> zero_frames(c2port::RING * c2port::FRAME_SIZE, c2port::INPUT_OFFSET);
+  std::vector<uint8_t> zero_frames(c2port::RING * c2port::PIXELS * 8, 0);
   for (auto &r : s->ring) {
-    r = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, zero_frames.size() * sizeof(float),
-                                    zero_frames.data(), &err));
+    r = CL_CHECK_ERR(clCreateBuffer(context, CL_MEM_READ_WRITE | CL_MEM_COPY_HOST_PTR, zero_frames.size(), zero_frames.data(), &err));
   }
 
   s->traffic_convention[Params().getBool("IsRHD") ? 1 : 0] = 1.0;
@@ -158,12 +157,18 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
     }
   }
 
-  // frames: narrow and wide (the narrow camera again on the comma two), each into its ring at ring_head
+  // frames: narrow and wide (the narrow camera again on the comma two), each into its ring at ring_head, and with the
+  // frames of 4 ago straight into the model input 'imgs' [1,128,256,32], channel-last: per pixel narrow t-4, narrow t,
+  // wide t-4, wide t (8 floats each). Harmless on a dropped frame: the next executed frame rewrites all of 'imgs'.
   VisionBuf *wide = (wbuf != nullptr) ? wbuf : buf;
-  s->frame->prepare_hwc8(buf->buf_cl, buf->width, buf->height, transform, s->ring[0], s->ring_head);
-  s->wide_frame->prepare_hwc8(wide->buf_cl, wide->width, wide->height, transform_wide, s->ring[1], s->ring_head);
   const int slot_t = s->ring_head, slot_t4 = (s->ring_head + 1) % RING;  // newest and 4 frames ago
   s->ring_head = (s->ring_head + 1) % RING;
+  cl_mem imgs = s->thneed->input_clmem[s->in_imgs];
+  s->frame->prepare_hwc8(buf->buf_cl, buf->width, buf->height, transform, s->ring[0], slot_t, slot_t4, imgs, 0);
+  s->wide_frame->prepare_hwc8(wide->buf_cl, wide->width, wide->height, transform_wide, s->ring[1], slot_t, slot_t4, imgs, 1);
+  // NOTE: thneed replays on its own context, so the input must be complete before it runs
+  s->frame->finish();
+  s->wide_frame->finish();
 
   auto push_feature = [&](const float *f) {
     std::memmove(s->feat_hist.data(), s->feat_hist.data() + FEAT_LEN, (FEAT_HIST - 1) * FEAT_LEN * sizeof(float));
@@ -176,10 +181,6 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
     push_feature(last.data());
     return nullptr;
   }
-
-  // model input 'imgs' [1,128,256,32], channel-last: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each),
-  // gathered on the GPU straight into the thneed's input buffer
-  s->frame->gather_hwc8(s->ring[0], s->ring[1], slot_t4, slot_t, slot_t4, slot_t, s->thneed->input_clmem[s->in_imgs]);
 
   // feature history tokens: every 4th of the 96-step history (rows 0, 4, .., 92), the last 8 = rows 64 .. 92,
   // i.e. the features of frames t-32 .. t-4 (taken before this frame's feature is pushed)

@@ -21,16 +21,14 @@ void loadyuv_init(LoadYUVState* s, cl_context ctx, cl_device_id device_id, int w
   s->loadys_krnl = CL_CHECK_ERR(clCreateKernel(prg, "loadys", &err));
   s->loaduv_krnl = CL_CHECK_ERR(clCreateKernel(prg, "loaduv", &err));
   s->copy_krnl = CL_CHECK_ERR(clCreateKernel(prg, "copy", &err));
-  s->to_hwc8_krnl = CL_CHECK_ERR(clCreateKernel(prg, "to_hwc8", &err));
-  s->gather_hwc8_krnl = CL_CHECK_ERR(clCreateKernel(prg, "gather_hwc8", &err));
+  s->load_hwc8_krnl = CL_CHECK_ERR(clCreateKernel(prg, "load_hwc8", &err));
 
   // done with this
   CL_CHECK(clReleaseProgram(prg));
 }
 
 void loadyuv_destroy(LoadYUVState* s) {
-  CL_CHECK(clReleaseKernel(s->to_hwc8_krnl));
-  CL_CHECK(clReleaseKernel(s->gather_hwc8_krnl));
+  CL_CHECK(clReleaseKernel(s->load_hwc8_krnl));
   CL_CHECK(clReleaseKernel(s->loadys_krnl));
   CL_CHECK(clReleaseKernel(s->loaduv_krnl));
   CL_CHECK(clReleaseKernel(s->copy_krnl));
@@ -78,22 +76,14 @@ void loadyuv_queue(LoadYUVState* s, cl_command_queue q,
                                &loaduv_work_size, NULL, 0, 0, NULL));
 }
 
-void loadyuv_to_hwc8(LoadYUVState* s, cl_command_queue q, cl_mem planar_cl, cl_mem hwc8_cl, int out_slot) {
+void loadyuv_hwc8(LoadYUVState* s, cl_command_queue q, cl_mem y_cl, cl_mem u_cl, cl_mem v_cl,
+                  cl_mem ring_cl, int slot_t, int slot_t4, cl_mem out_cl, int cam) {
+  const cl_mem mems[4] = {y_cl, u_cl, v_cl, ring_cl};
+  for (int i = 0; i < 4; i++) CL_CHECK(clSetKernelArg(s->load_hwc8_krnl, i, sizeof(cl_mem), &mems[i]));
+  CL_CHECK(clSetKernelArg(s->load_hwc8_krnl, 4, sizeof(cl_int), &slot_t));
+  CL_CHECK(clSetKernelArg(s->load_hwc8_krnl, 5, sizeof(cl_int), &slot_t4));
+  CL_CHECK(clSetKernelArg(s->load_hwc8_krnl, 6, sizeof(cl_mem), &out_cl));
+  CL_CHECK(clSetKernelArg(s->load_hwc8_krnl, 7, sizeof(cl_int), &cam));
   const size_t pixels = (s->width/2)*(s->height/2);
-  const cl_int out_offset = out_slot * pixels;
-  CL_CHECK(clSetKernelArg(s->to_hwc8_krnl, 0, sizeof(cl_mem), &planar_cl));
-  CL_CHECK(clSetKernelArg(s->to_hwc8_krnl, 1, sizeof(cl_mem), &hwc8_cl));
-  CL_CHECK(clSetKernelArg(s->to_hwc8_krnl, 2, sizeof(cl_int), &out_offset));
-  CL_CHECK(clEnqueueNDRangeKernel(q, s->to_hwc8_krnl, 1, NULL, &pixels, NULL, 0, 0, NULL));
-}
-
-void loadyuv_gather_hwc8(LoadYUVState* s, cl_command_queue q, cl_mem a, cl_mem b, int a0, int a1, int b0, int b1,
-                         cl_mem out_cl) {
-  const cl_int slots[4] = {a0, a1, b0, b1};
-  CL_CHECK(clSetKernelArg(s->gather_hwc8_krnl, 0, sizeof(cl_mem), &a));
-  CL_CHECK(clSetKernelArg(s->gather_hwc8_krnl, 1, sizeof(cl_mem), &b));
-  for (int i = 0; i < 4; i++) CL_CHECK(clSetKernelArg(s->gather_hwc8_krnl, 2 + i, sizeof(cl_int), &slots[i]));
-  CL_CHECK(clSetKernelArg(s->gather_hwc8_krnl, 6, sizeof(cl_mem), &out_cl));
-  const size_t pixels = (s->width/2)*(s->height/2);
-  CL_CHECK(clEnqueueNDRangeKernel(q, s->gather_hwc8_krnl, 1, NULL, &pixels, NULL, 0, 0, NULL));
+  CL_CHECK(clEnqueueNDRangeKernel(q, s->load_hwc8_krnl, 1, NULL, &pixels, NULL, 0, 0, NULL));
 }
