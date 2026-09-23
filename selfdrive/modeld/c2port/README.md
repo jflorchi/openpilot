@@ -30,6 +30,8 @@ On the device (`/data/c2port`, see `device/`):
 | `build_final.sh` | compiles `supercombo_c2port.thneed` on the GPU (`SAVE_SOURCE=1 OPT=99 OPENCL=1 FLOAT16=1 UNSAFE_FLOAT4=1 NATIVE_EXPLOG=1 OPTWG=1`) and checks it with `thneed_check.py` (a Python mirror of `thneed/serialize.cc`) on real frames |
 | `full_cycle.sh` | all of the above plus installing into a build copy (`/data/c2port/op`), rebuilding modeld, and `live_test.sh` |
 | `live_test.sh` | parked bench: camerad + calibrationd + the ported modeld on the live camera, `live_monitor.py` stats, `C2PORT_DUMP` dump checked by `check_dump4.py` |
+| `kprof.py` | per-kernel GPU time of a thneed (OpenCL profiling events), written to a JSON with each kernel's source |
+| `splitk.py` | rewrites the weight-bound 1x1 convs of a built thneed as split-K kernels (tuned per kernel on real frames, each checked against the original kernel's output); run it on `supercombo_c2port.thneed` after `build_final.sh` |
 
 The ssh proxy only carries ~5 kB/s and drops long transfers, so the device downloads the large public inputs itself.
 
@@ -51,6 +53,18 @@ All fixed in `tinygrad_c2port.patch` or in the graph rewrite:
 - Live bench (parked, own camera): 19.9 Hz, `modelExecutionTime` median 39.5 ms / p90 40.1 ms including frame
   preparation, frame drops 0.4%, C++ outputs within 2-5e-3 of an fp32 reference on the dumped inputs, history buffers
   consistent.
+
+## Split-K (`splitk.py`)
+
+Per-kernel profile of the built thneed: 32.2 ms of GPU time over 189 kernels, spread flat (top 10 = 26%), with no gaps
+between kernels. The 1x1 convs with one output pixel (the policy / temporal matmuls, 92 kernels) were 37% of it and
+streamed their 47 MB of weights at ~4 GB/s: tinygrad gives each thread one packed output channel and loops over every
+input channel, so they ran as 1-16 workgroups. `splitk.py` lets S threads share an output channel and adds the partial
+sums in local memory, keeping the kernel signature and fused epilogue, so only the program source and work sizes in the
+thneed header change. 22 of 28 target programs replaced (the 9-row convs are faster as they were).
+
+- GPU time 32.2 -> 25.3 ms; real frames vs fp32 2.03e-3 / 1.20e-3 -> 2.04e-3 / 1.21e-3.
+- Live bench, back to back: `modelExecutionTime` median 34.5 -> 27.6 ms, 20.1 Hz, no frame drops, history check OK.
 
 ## Install / roll back
 
