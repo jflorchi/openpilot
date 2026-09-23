@@ -18,14 +18,15 @@ def logging(started, params, CP: car.CarParams) -> bool:
   return started and run
 
 procs = [
+  # logging stack (logcatd, loggerd, proclogd, logmessaged) off: enabled=False, so controlsd ignores them too
   DaemonProcess("manage_athenad", "selfdrive.athena.manage_athenad", "AthenadPid"),
   # due to qualcomm kernel bugs SIGKILLing camerad sometimes causes page table corruption
   NativeProcess("camerad", "selfdrive/camerad", ["./camerad"], unkillable=True, callback=driverview),
   NativeProcess("clocksd", "selfdrive/clocksd", ["./clocksd"]),
-  NativeProcess("logcatd", "selfdrive/logcatd", ["./logcatd"]),
-  NativeProcess("loggerd", "selfdrive/loggerd", ["./loggerd"], onroad=False, callback=logging),
+  NativeProcess("logcatd", "selfdrive/logcatd", ["./logcatd"], enabled=False),
+  NativeProcess("loggerd", "selfdrive/loggerd", ["./loggerd"], onroad=False, callback=logging, enabled=False),
   NativeProcess("modeld", "selfdrive/modeld", ["./modeld"]),
-  NativeProcess("proclogd", "selfdrive/proclogd", ["./proclogd"]),
+  NativeProcess("proclogd", "selfdrive/proclogd", ["./proclogd"], enabled=False),
   NativeProcess("sensord", "selfdrive/sensord", ["./sensord"], enabled=not PC, offroad=EON, sigkill=EON),
   NativeProcess("ndkgpsd", "selfdrive/locationd", ["./ndkgpsd"], enabled=(EON)),
   NativeProcess("ui", "selfdrive/ui", ["./ui"], offroad=True, watchdog_max_dt=(5 if TICI else None)),
@@ -36,7 +37,7 @@ procs = [
   PythonProcess("torqued", "selfdrive.locationd.torqued"),
   PythonProcess("controlsd", "selfdrive.controls.controlsd"),
   PythonProcess("deleter", "selfdrive.loggerd.deleter", offroad=True),
-  PythonProcess("logmessaged", "selfdrive.logmessaged", offroad=True),
+  PythonProcess("logmessaged", "selfdrive.logmessaged", offroad=True, enabled=False),
   PythonProcess("navd", "selfdrive.navd.navd", enabled=(PC or TICI), offroad=True),
   PythonProcess("pandad", "selfdrive.boardd.pandad", offroad=True),
   PythonProcess("paramsd", "selfdrive.locationd.paramsd"),
