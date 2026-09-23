@@ -33,6 +33,7 @@ class NvgWindow : public CameraViewWidget {
   Q_PROPERTY(bool is_cruise_set MEMBER is_cruise_set);
   Q_PROPERTY(bool engageable MEMBER engageable);
   Q_PROPERTY(QString timeStr MEMBER timeStr);
+  Q_PROPERTY(QString modelTimeStr MEMBER modelTimeStr);
   Q_PROPERTY(int status MEMBER status);
 
 public:
@@ -52,6 +53,7 @@ private:
   bool is_cruise_set = false;
   bool engageable = false;
   QString timeStr;
+  QString modelTimeStr;
   int status = STATUS_DISENGAGED;
 
 protected:

@@ -187,10 +187,12 @@ void NvgWindow::updateState(const UIState &s) {
   setProperty("speedUnit", s.scene.is_metric ? "km/h" : "mph");
   setProperty("status", s.status);
 
-  // update engageability icon and the clock at 2Hz
+  // update engageability icon, the clock and the model time at 2Hz
   if (sm.frame % (UI_FREQ / 2) == 0) {
     setProperty("engageable", cs.getEngageable() || cs.getEnabled());
     setProperty("timeStr", currentTimeStr());
+    float model_ms = sm["modelV2"].getModelV2().getModelExecutionTime() * 1000.;
+    setProperty("modelTimeStr", sm.alive("modelV2") ? QString("model %1 ms").arg(model_ms, 0, 'f', 1) : "model --");
   }
 }
 
@@ -231,6 +233,10 @@ void NvgWindow::drawHud(QPainter &p) {
     drawIcon(p, rect().right() - radius / 2 - bdr_s * 2, radius / 2 + int(bdr_s * 1.5),
              engage_img, bg_colors[status], 1.0);
   }
+
+  // model execution time above the clock
+  configFont(p, "Open Sans", 40, "SemiBold");
+  drawText(p, radius / 2 + (bdr_s * 2), rect().bottom() - bdr_s * 2 - 90, modelTimeStr, 200);
 
   // clock, bottom left where the dm icon used to be
   configFont(p, "Open Sans", 66, "SemiBold");
