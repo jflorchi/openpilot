@@ -167,14 +167,6 @@ void run_model(ModelState &model, VisionIpcClient &vipc_client_main, VisionIpcCl
 }
 
 int main(int argc, char **argv) {
-  if (!Hardware::PC()) {
-    int ret;
-    ret = util::set_realtime_priority(54);
-    assert(ret == 0);
-    util::set_core_affinity({Hardware::EON() ? 2 : 7});
-    assert(ret == 0);
-  }
-
   bool main_wide_camera = Hardware::TICI() ? Params().getBool("WideCameraOnly") : false;
   bool use_extra_client = Hardware::TICI() && !main_wide_camera;
 
@@ -186,6 +178,15 @@ int main(int argc, char **argv) {
   ModelState model;
   model_init(&model, device_id, context);
   LOGW("models loaded, modeld starting");
+
+  // Go realtime only after the models are loaded. The C2PORT thneed builds its OpenCL programs from source at load
+  // (~30 s of CPU); at RT priority 54 on camerad's core that starves camerad (53) and shows Camera Malfunction.
+  if (!Hardware::PC()) {
+    int ret;
+    ret = util::set_realtime_priority(54);
+    assert(ret == 0);
+    util::set_core_affinity({Hardware::EON() ? 2 : 7});
+  }
 
   VisionIpcClient vipc_client_main = VisionIpcClient("camerad", main_wide_camera ? VISION_STREAM_WIDE_ROAD : VISION_STREAM_ROAD, true, device_id, context);
   VisionIpcClient vipc_client_extra = VisionIpcClient("camerad", VISION_STREAM_WIDE_ROAD, false, device_id, context);

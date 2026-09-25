@@ -1,16 +1,67 @@
 #include <cassert>
+#include <cstdio>
 #include <set>
 
 #include "json11.hpp"
 #include "common/util.h"
 #include "common/clutil.h"
+#include "common/swaglog.h"
+#include "common/timing.h"
 #include "selfdrive/modeld/thneed/thneed.h"
 using namespace json11;
 
 extern map<cl_program, string> g_program_source;
 
+// Source-only thneeds (tinygrad) would otherwise compile every program on each start (~30 s for the C2PORT model).
+// Compiled programs are cached here, keyed by source and driver version. A missing or bad entry falls back to source.
+#define PROGRAM_CACHE_DIR "/data/c2port/clcache"
+
+static uint64_t fnv1a(const string &s, uint64_t h = 1469598103934665603ULL) {
+  for (unsigned char c : s) { h ^= c; h *= 1099511628211ULL; }
+  return h;
+}
+
+static cl_program program_from_cache_or_source(cl_context context, cl_device_id device_id, const string &source, int *cache_hits) {
+  char driver[256] = {0};
+  clGetDeviceInfo(device_id, CL_DRIVER_VERSION, sizeof(driver) - 1, driver, NULL);
+  char path[512];
+  snprintf(path, sizeof(path), PROGRAM_CACHE_DIR "/%016llx.bin", (unsigned long long)fnv1a(source, fnv1a(driver)));
+
+  string binary = util::file_exists(path) ? util::read_file(path) : "";
+  if (!binary.empty()) {
+    int err;
+    size_t length = binary.size();
+    const uint8_t *bin = (const uint8_t *)binary.data();
+    cl_program prg = clCreateProgramWithBinary(context, 1, &device_id, &length, &bin, NULL, &err);
+    if (err == CL_SUCCESS && clBuildProgram(prg, 1, &device_id, NULL, NULL, NULL) == CL_SUCCESS) {
+      (*cache_hits)++;
+      return prg;
+    }
+    LOGW("thneed: cached program %s unusable (err %d), building from source", path, err);
+    if (err == CL_SUCCESS) clReleaseProgram(prg);
+  }
+
+  cl_program prg = cl_program_from_source(context, device_id, source);
+  size_t size = 0;
+  if (clGetProgramInfo(prg, CL_PROGRAM_BINARY_SIZES, sizeof(size), &size, NULL) == CL_SUCCESS && size > 0) {
+    string out(size, '\0');
+    uint8_t *bufs[1] = {(uint8_t *)out.data()};
+    if (clGetProgramInfo(prg, CL_PROGRAM_BINARIES, sizeof(bufs), bufs, NULL) == CL_SUCCESS) {
+      util::create_directories(PROGRAM_CACHE_DIR, 0775);
+      string tmp = string(path) + ".tmp";
+      if (util::write_file(tmp.c_str(), out.data(), out.size(), O_WRONLY | O_CREAT | O_TRUNC) == 0) {
+        rename(tmp.c_str(), path);
+      }
+    } else {
+      LOGW("thneed: clGetProgramInfo(CL_PROGRAM_BINARIES) failed, not caching");
+    }
+  }
+  return prg;
+}
+
 void Thneed::load(const char *filename) {
   printf("Thneed::load: loading from %s\n", filename);
+  double t_start = millis_since_boot();
 
   string buf = util::read_file(filename);
   int jsz = *(int *)buf.data();
@@ -89,11 +140,17 @@ void Thneed::load(const char *filename) {
     real_mem[*(cl_mem*)(mobj["id"].string_value().data())] = clbuf;
   }
 
+  double t_objects = millis_since_boot();
   map<string, cl_program> g_programs;
+  int cache_hits = 0;
   for (const auto &[name, source] : jdat["programs"].object_items()) {
     if (debug >= 1) printf("building %s with size %zu\n", name.c_str(), source.string_value().size());
-    g_programs[name] = cl_program_from_source(context, device_id, source.string_value());
+    g_programs[name] = named_io ? program_from_cache_or_source(context, device_id, source.string_value(), &cache_hits)
+                                : cl_program_from_source(context, device_id, source.string_value());
   }
+  double t_programs = millis_since_boot();
+  LOGW("thneed load: objects %.0f ms, %zu programs %.0f ms (%d cached)", t_objects - t_start,
+       jdat["programs"].object_items().size(), t_programs - t_objects, cache_hits);
 
   for (auto &obj : jdat["binaries"].array_items()) {
     string name = obj["name"].string_value();

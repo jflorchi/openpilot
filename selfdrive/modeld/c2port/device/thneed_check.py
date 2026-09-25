@@ -73,7 +73,17 @@ def load_thneed(path):
       buf = image_from_buffer(buf, o['width'], o['height'], o['row_pitch'])
     mem[o['id']] = buf
 
-  programs = {name: cl.Program(ctx, src).build() for name, src in jdat['programs'].items()}
+  if int(os.environ.get('CLCACHE', 0)):  # programs from serialize.cc's binary cache (same key: FNV-1a of driver, then source)
+    def fnv1a(s, h=1469598103934665603):
+      for c in s.encode('latin_1'):
+        h = ((h ^ c) * 1099511628211) & 0xFFFFFFFFFFFFFFFF
+      return h
+    dev = ctx.devices[0]
+    drv = fnv1a(dev.driver_version)
+    programs = {name: cl.Program(ctx, [dev], [open('/data/c2port/clcache/%016x.bin' % fnv1a(src, drv), 'rb').read()]).build()
+                for name, src in jdat['programs'].items()}
+  else:
+    programs = {name: cl.Program(ctx, src).build() for name, src in jdat['programs'].items()}
   assert not jdat.get('binaries'), 'expected a source-only thneed'
 
   kernels = []
@@ -127,6 +137,7 @@ if __name__ == '__main__':
             'traffic_convention': np.array([[1, 0]], np.float32), 'action_t': np.array([[0.275, 0.525]], np.float32)}
     feed = {k: v for k, v in feed.items() if k in inputs}
     out, _ = run(feed)
+    if os.environ.get('SAVE_OUT'): np.save(f"{os.environ['SAVE_OUT']}_{i}.npy", out)
     ref = d[f'out{i}'][0]
     print(f'real frame {i}: rel L2 {np.linalg.norm(out - ref) / np.linalg.norm(ref):.2e}  plan-mean max|diff| {np.abs(out[plan] - ref[plan]).max():.4f}  finite {np.isfinite(out).all()}')
   gpu = [run(feed)[1] for _ in range(20)]

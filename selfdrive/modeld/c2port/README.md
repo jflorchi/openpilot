@@ -42,7 +42,7 @@ All fixed in `tinygrad_c2port.patch` or in the graph rewrite:
 - `write_imagef` into a `CL_HALF_FLOAT` image **rounds toward zero** (100% of values). It compounds to ~13% output error in fp16. Every image write now goes through `write_imageh(convert_half4_rte())`.
 - Grouped convs with a channel multiplier are computed wrong by the image backend (rewritten in step 1).
 - `OPT>=2` fused an elementwise op onto a conv through a pure reshape, giving an NCHW-shaped image output (crash); `get_getters` fell through to a float* getter for image inputs in another layout (compile error); `UNSAFE_FLOAT4` baked constants with `%f` (6 decimals).
-- `MATMUL=1` gives wrong results; `GPU=1` (buffer kernels) is ~20x too slow; `clGetProgramInfo(BINARIES)` fails, so the thneed ships kernel source (`SAVE_SOURCE=1`) with `-D` options as `#define`s.
+- `MATMUL=1` gives wrong results; `GPU=1` (buffer kernels) is ~20x too slow; `clGetProgramInfo(BINARIES)` fails under pyopencl, so the thneed ships kernel source (`SAVE_SOURCE=1`) with `-D` options as `#define`s. From C++ it works: `serialize.cc` caches the compiled programs in `/data/c2port/clcache` (keyed by source + driver version), so only the first start after a model change compiles (~27 s for 124 programs); later starts load them in ~60 ms. Outputs are bit-identical (`CLCACHE=1 thneed_check.py`).
 - Images backed by linear buffers are ~20% slower than native images; the loader creates native images for tinygrad-format files.
 - Inputs written by `memcpy` into mapped buffers are replayed stale by the recorded kgsl commands; `Thneed::write_inputs` uses `clEnqueueWriteBuffer`.
 
