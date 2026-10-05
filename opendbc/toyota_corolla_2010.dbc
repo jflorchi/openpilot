@@ -187,7 +187,20 @@ BO_ 956 GEAR_PACKET_LEGACY: 8 XXX
  SG_ GEAR : 13|6@0+ (1,0) [0|63] "" XXX
  SG_ SPORT_ON : 3|1@0+ (1,0) [0|1] "" XXX
 
-CM_ BO_ 720 "Gear selector position, one-hot in byte 2, ~30Hz. 0x08 never observed;
+BO_ 708 ENGINE_RPM: 8 XXX
+ SG_ RPM : 7|16@0+ (0.78125,0) [0|51200] "rpm" XXX
+ SG_ CHECK_ENGINE : 38|1@0+ (1,0) [0|1] "" XXX
+
+BO_ 896 OUTSIDE_TEMP: 8 XXX
+ SG_ OUTSIDE_TEMP_RAW : 55|8@0+ (1,0) [0|255] "" XXX
+
+BO_ 948 ENGINE_TEMP: 8 XXX
+ SG_ COOLANT_GAUGE : 23|8@0+ (1,0) [0|255] "" XXX
+
+BO_ 1552 METER_SPEED: 8 XXX
+ SG_ SPEED : 23|8@0+ (1,0) [0|255] "kph" XXX
+
+CM_ BO_ 720"Gear selector position, one-hot in byte 2, ~30Hz. 0x08 never observed;
 0x00 appears while the lever is between detents.";
 CM_ SG_ 720 GEAR_UNKNOWN_B7 "Not part of the gear code. Only ever seen set while in D.";
 CM_ BO_ 956 GEAR_PACKET_LEGACY "Stock Toyota gear packet location. Present on the bus at
@@ -200,6 +213,11 @@ CM_ SG_ 951 BRAKE_LIGHTS_ACC "brake lights when ACC commands decel";
 CM_ SG_ 1553 ODOMETER "Unit is dependent upon units signal";
 CM_ SG_ 548 BRAKE_PRESSURE "seems prop to pedal force";
 CM_ SG_ 610 TYPE "seems 1 on Corolla, 0 on all others";
+CM_ SG_ 708 RPM "~41Hz. Scale confirmed by gearing: 4th with lockup gives ~2500 rpm at 100 km/h. 0x3B3 bytes 0-1 carry an identical copy.";
+CM_ SG_ 708 CHECK_ENGINE "MIL. Dropped 80 ms after a Mode 04 clear, see selfdrive/car/glen/OBD_NOTES.md.";
+CM_ SG_ 896 OUTSIDE_TEMP_RAW "~1Hz. Follows time of day across two months of routes (low ~9 on cold mornings, high ~66 on summer evenings). Scale unconfirmed, raw/2 = degC is a guess. 0x640 byte 5 is an inverse copy (r=-0.999).";
+CM_ SG_ 948 COOLANT_GAUGE "~1Hz. Rises ~35 to ~178 over 12 min from a cold start, then holds 175-184. Floors at 32 on cold starts regardless of ambient, so it looks like gauge needle position rather than degC; raw/2 is a guess. OBD PID 05 is supported and would calibrate it.";
+CM_ SG_ 1552 SPEED "~2Hz. Speed as shown on the stock cluster, reads ~0.8% below vEgo.";
 VAL_ 513 STATE 5 "FAULT_TIMEOUT" 4 "FAULT_STARTUP" 3 "FAULT_SCE" 2 "FAULT_SEND" 1 "FAULT_BAD_CHECKSUM" 0 "NO_FAULT" ;
 VAL_ 1553 UNITS 1 "km" 2 "miles" ;
 VAL_ 1556 TURN_SIGNALS 3 "none" 2 "right" 1 "left" ;
