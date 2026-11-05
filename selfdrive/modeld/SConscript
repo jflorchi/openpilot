@@ -63,27 +63,6 @@ else:
 
 common_model = lenv.Object(common_src)
 
-# build thneed model
-if use_thneed and arch in ("aarch64", "larch64"):
-  fn = File("models/supercombo").abspath
-  compiler = lenv.Program('thneed/compile', ["thneed/compile.cc"]+common_model, LIBS=libs)
-  cmd = f"cd {Dir('.').abspath} && {compiler[0].abspath} --in {fn}.dlc --out {fn}_badweights.thneed --binary --optimize"
-
-  lib_paths = ':'.join(Dir(p).abspath for p in lenv["LIBPATH"])
-  kernel_path = os.path.join(Dir('.').abspath, "thneed", "kernels")
-  cenv = Environment(ENV={'LD_LIBRARY_PATH': f"{lib_paths}:{lenv['ENV']['LD_LIBRARY_PATH']}", 'KERNEL_PATH': kernel_path})
-
-  kernels = [os.path.join(kernel_path, x) for x in os.listdir(kernel_path) if x.endswith(".cl")]
-  cenv.Command(fn + "_badweights.thneed", [fn + ".dlc", kernels, compiler], cmd)
-
-  from selfdrive.modeld.thneed.weights_fixup import weights_fixup
-  def weights_fixup_action(target, source, env):
-    weights_fixup(target[0].abspath, source[0].abspath, source[1].abspath)
-
-  env = Environment(BUILDERS = {'WeightFixup' : Builder(action = weights_fixup_action)})
-  env.WeightFixup(target=fn + ".thneed", source=[fn+"_badweights.thneed", fn+".dlc"])
-
-
 lenv.Program('_dmonitoringmodeld', [
     "dmonitoringmodeld.cc",
     "models/dmonitoring.cc",
@@ -93,12 +72,11 @@ modeld_src = [
   "modeld.cc",
   "models/driving.cc",
 ]
-lenv.Program('_modeld', modeld_src + common_model, LIBS=libs)
-
-# current upstream supercombo ported to the comma two (selfdrive/modeld/c2port), built next to the default model.
-# The modeld launcher runs it when /data/c2port/USE_C2PORT exists; remove that file to go back.
+# The driving model is the current upstream supercombo ported to the comma two (selfdrive/modeld/c2port). Its thneed,
+# models/supercombo_c2port.thneed, is built on the device (c2port/device/) and isn't in git.
 if use_thneed and arch == "aarch64":
-  c2env = lenv.Clone()
-  c2env['CXXFLAGS'].append("-DC2PORT")
-  c2port_objs = [c2env.Object(os.path.splitext(f)[0] + "_c2port.o", f) for f in modeld_src]
-  c2env.Program('_modeld_c2port', c2port_objs + common_model, LIBS=libs)
+  menv = lenv.Clone()
+  menv['CXXFLAGS'].append("-DC2PORT")
+  menv.Program('_modeld', modeld_src + common_model, LIBS=libs)
+else:
+  lenv.Program('_modeld', modeld_src + common_model, LIBS=libs)

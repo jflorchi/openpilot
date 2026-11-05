@@ -66,7 +66,9 @@ thneed header change. 22 of 28 target programs replaced (the 9-row convs are fas
 - GPU time 32.2 -> 25.3 ms; real frames vs fp32 2.03e-3 / 1.20e-3 -> 2.04e-3 / 1.21e-3.
 - Live bench, back to back: `modelExecutionTime` median 34.5 -> 27.6 ms, 20.1 Hz, no frame drops, history check OK.
 
-## Install / roll back
+## Install
 
-Install: copy `/data/c2port/supercombo_c2port.thneed` to `selfdrive/modeld/models/` and rebuild; `SConscript` defines
-`C2PORT` when the file exists. Roll back: delete it and rebuild; modeld is then exactly the previous (Nuclear Grade) path.
+This is the only driving model; the previous one (Nuclear Grade, `supercombo.dlc`) has been removed. `SConscript`
+builds `_modeld` with `C2PORT` on the device. The thneed isn't in git: build it with `build_final.sh` (+ `splitk.py`),
+then `install_c2port.sh` copies it to `selfdrive/modeld/models/supercombo_c2port.thneed` and rebuilds modeld. Without
+that file modeld can't start.
