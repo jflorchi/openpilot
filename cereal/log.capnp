@@ -1727,6 +1727,25 @@ struct LiveTorqueParametersData {
   points @10 :List(List(Float32));
   version @11 :Int32;
   useParams @12 :Bool;
+  calPerc @13 :Int8;
+}
+
+struct LateralDelay {
+  lateralDelay @0 :Float32;
+  validBlocks @1 :Int32;
+  status @2 :Status;
+
+  lateralDelayEstimate @3 :Float32;
+  lateralDelayEstimateStd @5 :Float32;
+  points @4 :List(Float32);
+  calPerc @6 :Int8;
+  version @7 :Int32;
+
+  enum Status {
+    unestimated @0;
+    estimated @1;
+    invalid @2;
+  }
 }
 
 struct LiveMapDataDEPRECATED {
@@ -1876,6 +1895,7 @@ struct Event {
     driverState @59 :DriverState;
     liveParameters @61 :LiveParametersData;
     liveTorqueParameters @92 :LiveTorqueParametersData;
+    lateralDelay @93 :LateralDelay;
     cameraOdometry @63 :CameraOdometry;
     thumbnail @66: Thumbnail;
     carEvents @68: List(Car.CarEvent);

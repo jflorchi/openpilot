@@ -1,5 +1,12 @@
 #!/usr/bin/bash
 
+# boot-time tracing: touch /data/launch_trace to timestamp every command into /tmp/launch_trace.log
+if [ -f /data/launch_trace ]; then
+  exec {BASH_XTRACEFD}>/tmp/launch_trace.log
+  PS4='+ $EPOCHREALTIME '
+  set -x
+fi
+
 if [ -z "$BASEDIR" ]; then
   BASEDIR="/data/openpilot"
 fi
@@ -79,14 +86,20 @@ function two_init {
     chrt -f -p 52 $pid
   done
 
-  # the flippening!
-  LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
+  # These need the Android framework, which is still booting when init starts us (see init.comma.rc),
+  # so run them in the background once it's up instead of blocking startup on calls that would fail.
+  (
+    while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 1; done
 
-  # disable bluetooth
-  service call bluetooth_manager 8
+    # the flippening!
+    LD_LIBRARY_PATH="" content insert --uri content://settings/system --bind name:s:user_rotation --bind value:i:1
 
-  # wifi scan
-  wpa_cli IFNAME=wlan0 SCAN
+    # disable bluetooth
+    service call bluetooth_manager 8
+
+    # wifi scan
+    wpa_cli IFNAME=wlan0 SCAN
+  ) > /dev/null 2>&1 &
 
   # Check for NEOS update
   if [ $(< /VERSION) != "$REQUIRED_NEOS_VERSION" ]; then
@@ -124,9 +137,6 @@ function tici_init {
 function launch {
   # Remove orphaned git lock if it exists on boot
   [ -f "$DIR/.git/index.lock" ] && rm -f $DIR/.git/index.lock
-
-  # Pull time from panda
-  $DIR/selfdrive/boardd/set_time.py
 
   # Check to see if there's a valid overlay-based update available. Conditions
   # are as follows:

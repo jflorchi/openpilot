@@ -65,12 +65,23 @@ BO_ 35 SECONDARY_STEER_ANGLE: 8 XXX
  SG_ ANGLE : 23|16@0+ (1,0) [0|65535] "" XXX
  SG_ ZORRO_STEER : 7|32@0- (0.021973997,0) [-180|180] "" XXX
 
+BO_ 561 ZSS_STATUS: 4 XXX
+ SG_ ERRORS : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ RESET_CAUSE : 15|8@0+ (1,0) [0|255] "" XXX
+ SG_ CALIBRATED : 16|1@0+ (1,0) [0|1] "" XXX
+ SG_ TURN_SOURCE : 18|2@0+ (1,0) [0|3] "" XXX
+ SG_ CAL_REJECTED : 19|1@0+ (1,0) [0|1] "" XXX
+ SG_ CAR_ANGLE_FRESH : 20|1@0+ (1,0) [0|1] "" XXX
+ SG_ DEAF_RESET : 21|1@0+ (1,0) [0|1] "" XXX
+ SG_ CAL_SEQ : 31|8@0+ (1,0) [0|255] "" XXX
+
 BO_ 36 KINEMATICS: 8 XXX
  SG_ ACCEL_Y : 33|10@0+ (0.03589,-18.375) [0|65535] "m/s^2" XXX
  SG_ YAW_RATE : 1|10@0+ (0.244,-125) [0|65535] "deg/sec" XXX
  SG_ STEERING_TORQUE : 17|10@0+ (1,-512) [0|65535] "" XXX
 
 BO_ 37 STEER_ANGLE_SENSOR: 8 XXX
+ SG_ STATUS : 7|4@0+ (1,0) [0|15] "" XXX
  SG_ STEER_ANGLE : 3|12@0- (1.5,0) [-500|500] "deg" XXX
  SG_ STEER_FRACTION : 39|4@0- (0.1,0) [-0.7|0.7] "deg" XXX
  SG_ STEER_RATE : 35|12@0- (1,0) [-2000|2000] "deg/s" XXX
@@ -200,7 +211,7 @@ BO_ 948 ENGINE_TEMP: 8 XXX
 BO_ 1552 METER_SPEED: 8 XXX
  SG_ SPEED : 23|8@0+ (1,0) [0|255] "kph" XXX
 
-CM_ BO_ 720"Gear selector position, one-hot in byte 2, ~30Hz. 0x08 never observed;
+CM_ BO_ 720 "Gear selector position, one-hot in byte 2, ~30Hz. 0x08 never observed;
 0x00 appears while the lever is between detents.";
 CM_ SG_ 720 GEAR_UNKNOWN_B7 "Not part of the gear code. Only ever seen set while in D.";
 CM_ BO_ 956 GEAR_PACKET_LEGACY "Stock Toyota gear packet location. Present on the bus at
@@ -213,6 +224,10 @@ CM_ SG_ 951 BRAKE_LIGHTS_ACC "brake lights when ACC commands decel";
 CM_ SG_ 1553 ODOMETER "Unit is dependent upon units signal";
 CM_ SG_ 548 BRAKE_PRESSURE "seems prop to pedal force";
 CM_ SG_ 610 TYPE "seems 1 on Corolla, 0 on all others";
+CM_ SG_ 37 STATUS "china-sas board: 0 = angle valid (centre stored, tracking, both magnet sensors agree), 1 = invalid/fault/uncalibrated. The same board sends 0x23 on bus 0 only while valid.";
+CM_ BO_ 561 "micro_sas status, 5Hz on bus 2 while the ignition is on. Layout from the micro_sas firmware's 0x231 sender: error flags, last reset cause, calibration status, calibration sequence.";
+CM_ SG_ 561 CALIBRATED "A zero is stored in flash (set with ZERO on 0x232), so 0x23 is relative to true center across power cycles.";
+CM_ SG_ 561 TURN_SOURCE "Where the turn count came from: 0 boot zero (uncalibrated), 1 restored from RAM after a warm reset, 2 resolved against the car's 0x25 angle, 3 calibrated but not yet confirmed by the car.";
 CM_ SG_ 708 RPM "~41Hz. Scale confirmed by gearing: 4th with lockup gives ~2500 rpm at 100 km/h. 0x3B3 bytes 0-1 carry an identical copy.";
 CM_ SG_ 708 CHECK_ENGINE "MIL. Dropped 80 ms after a Mode 04 clear, see selfdrive/car/glen/OBD_NOTES.md.";
 CM_ SG_ 896 OUTSIDE_TEMP_RAW "~1Hz. Follows time of day across two months of routes (low ~9 on cold mornings, high ~66 on summer evenings). Scale unconfirmed, raw/2 = degC is a guess. 0x640 byte 5 is an inverse copy (r=-0.999).";

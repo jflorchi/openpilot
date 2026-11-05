@@ -1,7 +1,8 @@
 import math
+import numpy as np
 from cereal import car
 from common.numpy_fast import clip, interp
-from common.realtime import DT_MDL
+from common.realtime import DT_MDL, DT_CTRL
 from common.conversions import Conversions as CV
 from selfdrive.modeld.constants import T_IDXS
 
@@ -128,3 +129,50 @@ def get_lag_adjusted_curvature(CP, v_ego, psis, curvatures, curvature_rates, ste
                                      current_curvature + max_curvature_rate * DT_MDL)
 
   return safe_desired_curvature, safe_desired_curvature_rate
+
+
+# Desired curvature from the model's plan, and its limits, ported from upstream openpilot master
+# (selfdrive/controls/lib/drive_helpers.py). Upstream computes this in modeld for models without an
+# 'action' output, which is the case for the ported supercombo (C2PORT); here controlsd does it.
+MIN_SPEED = 1.0
+MAX_CURVATURE = 0.2  # This is a turn radius smaller than most cars can achieve
+MIN_STABLE_DELAY = 0.3
+MAX_LATERAL_ACCEL_NO_ROLL = 3.0  # m/s^2, EU guidelines
+ACCELERATION_DUE_TO_GRAVITY = 9.81
+
+
+def clamp(val, min_val, max_val):
+  clamped_val = float(np.clip(val, min_val, max_val))
+  return clamped_val, clamped_val != val
+
+
+def clip_curvature(v_ego, prev_curvature, new_curvature, roll):
+  # This function respects ISO lateral jerk and acceleration limits + a max curvature
+  v_ego = max(v_ego, MIN_SPEED)
+  max_curvature_rate = MAX_LATERAL_JERK / (v_ego ** 2)  # inexact calculation, check https://github.com/commaai/openpilot/pull/24755
+  new_curvature = np.clip(new_curvature,
+                          prev_curvature - max_curvature_rate * DT_CTRL,
+                          prev_curvature + max_curvature_rate * DT_CTRL)
+
+  roll_compensation = roll * ACCELERATION_DUE_TO_GRAVITY
+  max_lat_accel = MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
+  min_lat_accel = -MAX_LATERAL_ACCEL_NO_ROLL + roll_compensation
+  new_curvature, limited_accel = clamp(new_curvature, min_lat_accel / v_ego ** 2, max_lat_accel / v_ego ** 2)
+
+  new_curvature, limited_max_curv = clamp(new_curvature, -MAX_CURVATURE, MAX_CURVATURE)
+  return float(new_curvature), limited_accel or limited_max_curv
+
+
+def curv_from_psis(psi_target, psi_rate, vego, action_t):
+  vego = np.clip(vego, MIN_SPEED, np.inf)
+  curv_from_psi = psi_target / (vego * action_t)
+  return 2 * curv_from_psi - psi_rate / vego
+
+
+def get_curvature_from_plan(yaws, yaw_rates, t_idxs, vego, action_t):
+  if action_t < MIN_STABLE_DELAY:
+    psi_target = (action_t / MIN_STABLE_DELAY) * np.interp(MIN_STABLE_DELAY, t_idxs, yaws)
+  else:
+    psi_target = np.interp(action_t, t_idxs, yaws)
+  psi_rate = yaw_rates[0]
+  return float(curv_from_psis(psi_target, psi_rate, vego, action_t))

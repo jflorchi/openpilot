@@ -48,6 +48,8 @@
   .knob .val { font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums; }
   .knob .stock { font-size: 11px; color: #71737c; margin-top: 2px; }
   .knob .desc { font-size: 12px; color: #71737c; margin-top: 6px; }
+  .knob .unpin { display: none; margin-top: 6px; padding: 4px 10px; font-size: 12px; }
+  .knob.modified .unpin { display: inline-block; }
 
   .row { display: flex; align-items: center; gap: 10px; margin-top: 12px; }
   button {
@@ -82,6 +84,7 @@
   .danger { background: #3a1c20; color: #f87171; }
   .primary { background: #1d4ed8; }
   .ghost { background: transparent; border: 1px solid #2c2e36; color: #9a9ca4; font-size: 13px; padding: 8px 12px; }
+  button:disabled { opacity: 0.5; }
   #toast {
     position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom));
     transform: translateX(-50%) translateY(20px);
@@ -121,6 +124,34 @@
   </div>
   <div class="desc" style="font-size:12px;color:#71737c;margin-top:10px">
     Marks are written to /data/live_tune_log.jsonl with a timestamp and the current values.
+  </div>
+</div>
+
+<h2>diagnostics</h2>
+<div class="knob">
+  <div class="row">
+    <button class="danger wide" id="btn-dtc">Clear DTCs</button>
+  </div>
+  <div class="desc" id="dtc-result" style="font-size:13px;margin-top:10px"></div>
+  <div class="desc" style="font-size:12px;color:#71737c;margin-top:10px">
+    OBD mode 04 to the ECM on the powertrain bus. Needs openpilot onroad, works while moving.
+    Also resets readiness monitors and fuel trims.
+  </div>
+</div>
+
+<h2>steering angle</h2>
+<div class="knob">
+  <div class="top">
+    <div><div class="label">Angle now</div></div>
+    <div class="val" id="sas-angle">--</div>
+  </div>
+  <div class="row">
+    <button class="primary wide" id="btn-sas-zero">Zero steering angle</button>
+  </div>
+  <div class="desc" id="sas-result" style="font-size:13px;margin-top:10px"></div>
+  <div class="desc" style="font-size:12px;color:#71737c;margin-top:10px">
+    Stores the current wheel position as 0&deg; on the steering angle board. Wheels pointing
+    straight ahead, hands off, wheel still for half a second. Needs openpilot onroad and not engaged.
   </div>
 </div>
 
@@ -175,7 +206,8 @@ function build() {
     el.className = "knob";
     el.id = "knob-" + knob.key;
     el.innerHTML =
-      '<div class="top"><div><div class="label"></div><div class="stock"></div></div>' +
+      '<div class="top"><div><div class="label"></div><div class="stock"></div>' +
+      '<button class="ghost unpin">reset to stock</button></div>' +
       '<div class="val"></div></div>' +
       '<div class="row"><button class="step" data-dir="-1">&minus;</button>' +
       '<input type="range"><button class="step" data-dir="1">+</button></div>' +
@@ -211,6 +243,12 @@ function build() {
         render();
         send(knob.key, next);
       });
+    });
+
+    el.querySelector(".unpin").addEventListener("click", function () {
+      delete values[knob.key];
+      render();
+      send(knob.key, null);  // null clears just this override on the server
     });
 
     main.appendChild(el);
@@ -264,6 +302,7 @@ function renderStatus(s) {
   m("m-speed", s.vEgoMph === undefined ? "--" : s.vEgoMph + " mph");
   m("m-err", s.latAccelError === undefined ? "--" : s.latAccelError.toFixed(2));
   m("m-out", s.output === undefined ? "--" : (s.saturated ? "SAT" : s.output.toFixed(2)));
+  m("sas-angle", s.steeringAngleDeg === undefined ? "--" : s.steeringAngleDeg.toFixed(1) + "\u00b0");
 }
 
 function apply(data, fromWrite) {
@@ -325,6 +364,45 @@ document.getElementById("btn-snap").addEventListener("click", function () {
 });
 
 poll();
+function dtcSummary(st) {
+  if (!st) return "?";
+  var codes = st.codes ? (st.codes.length ? st.codes.join(", ") : "none") : st.count + " code(s)";
+  return "MIL " + (st.mil ? "on" : "off") + ", " + codes;
+}
+
+document.getElementById("btn-dtc").addEventListener("click", function () {
+  if (!confirm("Clear all DTCs? This also resets readiness monitors and fuel trims.")) return;
+  var btn = this, out = document.getElementById("dtc-result");
+  btn.disabled = true;
+  out.textContent = "clearing...";
+  fetch("/api/clear_dtc", { method: "POST", body: "{}" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      out.textContent = d.ok ? "before: " + dtcSummary(d.before) + " \u2192 after: " + dtcSummary(d.after)
+                             : "not cleared: " + d.msg;
+      toast(d.ok ? "DTCs cleared" : "not cleared");
+    })
+    .catch(function () { out.textContent = ""; toast("lost connection"); })
+    .finally(function () { btn.disabled = false; });
+});
+
+document.getElementById("btn-sas-zero").addEventListener("click", function () {
+  if (!confirm("Wheels straight, hands off? This sets the current position as 0\u00b0.")) return;
+  var btn = this, out = document.getElementById("sas-result");
+  btn.disabled = true;
+  out.textContent = "zeroing, keep the wheel still...";
+  fetch("/api/sas_zero", { method: "POST", body: "{}" })
+    .then(function (r) { return r.json(); })
+    .then(function (d) {
+      out.textContent = d.ok ? "zeroed: " + d.before + "\u00b0 \u2192 " + (d.after === null ? "?" : d.after + "\u00b0")
+                             : "not zeroed: " + d.msg;
+      toast(d.ok ? "steering angle zeroed" : "not zeroed");
+      poll();
+    })
+    .catch(function () { out.textContent = ""; toast("lost connection"); })
+    .finally(function () { btn.disabled = false; });
+});
+
 setInterval(function () { if (!document.hidden) poll(); }, 1000);
 </script>
 </body>

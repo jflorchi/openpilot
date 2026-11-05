@@ -103,6 +103,9 @@ void HttpRequest::sendRequest(const QString &requestURL, const HttpRequest::Meth
     reply = nam()->get(request);
   } else if (method == HttpRequest::Method::DELETE) {
     reply = nam()->deleteResource(request);
+  } else if (method == HttpRequest::Method::POST) {
+    request.setHeader(QNetworkRequest::ContentTypeHeader, "application/json");
+    reply = nam()->post(request, QByteArray("{}"));
   }
 
   networkTimer->start();

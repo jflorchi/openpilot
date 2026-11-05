@@ -5,9 +5,10 @@ from typing import SupportsFloat
 
 from cereal import car, log
 from common.numpy_fast import clip
-from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL
+from common.realtime import sec_since_boot, config_realtime_process, Priority, Ratekeeper, DT_CTRL, DT_MDL
 from common.profiler import Profiler
 from common.params import Params, put_nonblocking
+from common.diag_tx import DiagTxReader
 from common.live_tune import LiveTuneReader, write_defaults
 import cereal.messaging as messaging
 from common.conversions import Conversions as CV
@@ -17,13 +18,13 @@ from selfdrive.boardd.boardd import can_list_to_can_capnp
 from selfdrive.car.car_helpers import get_car, get_startup_event, get_one_can
 from selfdrive.controls.lib.lane_planner import CAMERA_OFFSET
 from selfdrive.controls.lib.drive_helpers import update_v_cruise, initialize_v_cruise
-from selfdrive.controls.lib.drive_helpers import get_lag_adjusted_curvature
+from selfdrive.controls.lib.drive_helpers import clip_curvature, get_curvature_from_plan
 from selfdrive.controls.lib.latcontrol import LatControl
 from selfdrive.controls.lib.longcontrol import LongControl
 from selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from selfdrive.controls.lib.latcontrol_indi import LatControlINDI
 from selfdrive.controls.lib.latcontrol_angle import LatControlAngle
-from selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from selfdrive.controls.lib.latcontrol_torque import LatControlTorque, LOW_SPEED_KP_SCALE
 from selfdrive.controls.lib.latcontrol_model import LatControlModel
 from selfdrive.controls.lib.events import Events, ET
 from selfdrive.controls.lib.alertmanager import AlertManager, set_offroad_alert
@@ -33,6 +34,12 @@ from selfdrive.hardware import HARDWARE, TICI
 from selfdrive.manager.process_config import managed_processes
 
 SOFT_DISABLE_TIME = 3  # seconds
+
+# Desired curvature from the model's plan, as upstream's modeld does it (see get_model_curvature)
+LAT_SMOOTH_SECONDS = 0.0
+MIN_LAT_CONTROL_SPEED = 0.3
+FRAME_DELAY = DT_MDL  # compensate for time passed since the frame was captured: ~50 ms on average
+ACTION_DELAY = DT_MDL / 2  # middle of the interval between model output (current state) and next frame (expected state)
 LDW_MIN_SPEED = 31 * CV.MPH_TO_MS
 LANE_DEPARTURE_THRESHOLD = 0.1
 
@@ -41,7 +48,9 @@ SIMULATION = "SIMULATION" in os.environ
 NOSENSOR = "NOSENSOR" in os.environ
 IGNORE_PROCESSES = {"rtshield", "uploader", "deleter", "loggerd", "logmessaged", "tombstoned",
                     "logcatd", "proclogd", "clocksd", "updated", "timezoned", "manage_athenad",
-                    "statsd", "shutdownd"} | \
+                    "statsd", "shutdownd",
+                    # new and optional: if lagd dies, controlsd falls back to CP.steerActuatorDelay
+                    "lagd"} | \
                    {k for k, v in managed_processes.items() if not v.enabled}
 
 ThermalStatus = log.DeviceState.ThermalStatus
@@ -101,8 +110,10 @@ class Controls:
       ignore = ['driverCameraState', 'managerState'] if SIMULATION else None
       self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'liveCalibration',
                                      'driverMonitoringState', 'longitudinalPlan', 'lateralPlan', 'liveLocationKalman',
-                                     'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters'] + self.camera_packets + joystick_packet,
-                                    ignore_alive=ignore, ignore_avg_freq=['radarState', 'longitudinalPlan'])
+                                     'managerState', 'liveParameters', 'radarState', 'liveTorqueParameters',
+                                     'lateralDelay'] + self.camera_packets + joystick_packet,
+                                    ignore_alive=(ignore or []) + ['lateralDelay'],
+                                    ignore_avg_freq=['radarState', 'longitudinalPlan', 'lateralDelay'])
 
     # set alternative experiences from parameters
     self.disengage_on_accelerator = params.get_bool("DisengageOnAccelerator")
@@ -155,6 +166,8 @@ class Controls:
 
     # live lateral tuning from the web UI (selfdrive/livetuned)
     self.live_tune = LiveTuneReader()
+    # one-off diagnostic frames (clear DTCs) from the same UI, see common/diag_tx.py
+    self.diag_tx = DiagTxReader()
     if isinstance(self.LaC, LatControlTorque):
       write_defaults({
         'latAccelFactor': self.CP.lateralTuning.torque.latAccelFactor,
@@ -162,9 +175,8 @@ class Controls:
         'kp': self.CP.lateralTuning.torque.kp,
         'ki': self.CP.lateralTuning.torque.ki,
         'kf': self.CP.lateralTuning.torque.kf,
+        'kpLowSpeedScale': LOW_SPEED_KP_SCALE,
         'steerActuatorDelay': self.CP.steerActuatorDelay,
-        'lowSpeedFactorLow': self.LaC.base_low_speed_factor[0],
-        'lowSpeedFactorHigh': self.LaC.base_low_speed_factor[1],
       })
 
     self.initialized = False
@@ -188,7 +200,9 @@ class Controls:
     self.last_actuators = car.CarControl.Actuators.new_message()
     self.steer_limited = False
     self.desired_curvature = 0.0
-    self.desired_curvature_rate = 0.0
+    self.desired_curvature_rate = 0.0  # upstream dropped this; kept at 0 for controlsState
+    self.model_curvature = 0.0  # upstream's modelV2.action.desiredCurvature
+    self.curvature = 0.0
 
     # TODO: no longer necessary, aside from process replay
     self.sm['liveParameters'].valid = True
@@ -212,6 +226,27 @@ class Controls:
     # controlsd is driven by can recv, expected at 100Hz
     self.rk = Ratekeeper(100, print_delay_threshold=None)
     self.prof = Profiler(False)  # off by default
+
+  def get_lat_delay(self):
+    """Total lateral delay, as upstream's lateralDelay: a steerActuatorDelay pinned in the web tuner (+ 0.2, the
+    same offset lagd starts from), else lagd's estimate, else the car port's."""
+    pinned = self.live_tune.get().get('steerActuatorDelay')
+    if pinned is not None:
+      return pinned + 0.2 + LAT_SMOOTH_SECONDS
+    # like upstream, the value is used regardless of msg.valid: it only moves once lagd is confident,
+    # and flipping to the fallback on every input hiccup would make it jump around
+    if self.sm.alive['lateralDelay']:
+      return self.sm['lateralDelay'].lateralDelay + LAT_SMOOTH_SECONDS
+    return self.CP.steerActuatorDelay + 0.2 + LAT_SMOOTH_SECONDS
+
+  def get_model_curvature(self, v_ego, lat_delay):
+    """Upstream modeld's get_action_from_model for models without an 'action' output: the curvature that puts the
+    car on the plan's heading after the action delay. Lane lines play no part, as upstream."""
+    md = self.sm['modelV2']
+    if v_ego <= MIN_LAT_CONTROL_SPEED or len(md.orientation.z) != len(md.orientation.t) or len(md.orientation.t) == 0:
+      return self.model_curvature
+    lat_action_t = lat_delay + FRAME_DELAY + ACTION_DELAY
+    return get_curvature_from_plan(md.orientation.z, md.orientationRate.z, md.orientation.t, v_ego, lat_action_t)
 
   def update_events(self, CS):
     """Compute carEvents from carState"""
@@ -605,15 +640,22 @@ class Controls:
       t_since_plan = (self.sm.frame - self.sm.rcv_frame['longitudinalPlan']) * DT_CTRL
       actuators.accel = self.LoC.update(CC.longActive, CS, long_plan, pid_accel_limits, t_since_plan)
 
-      # Steering PID loop and lateral MPC
-      self.desired_curvature, self.desired_curvature_rate = get_lag_adjusted_curvature(self.CP, CS.vEgo,
-                                                                                       lat_plan.psis,
-                                                                                       lat_plan.curvatures,
-                                                                                       lat_plan.curvatureRates,
-                                                                                       self.live_tune.get().get('steerActuatorDelay'))
+      # Steering: desired curvature straight from the model's plan, as upstream (the lateral planner's MPC and
+      # lane lines are no longer in the steering path; plannerd still supplies the lane change desire)
+      lat_delay = self.get_lat_delay()
+      if self.sm.updated['modelV2']:
+        self.model_curvature = self.get_model_curvature(CS.vEgo, lat_delay)
+      self.curvature = -self.VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
+      # Reset desired curvature to current to avoid violating the limits on engage
+      new_desired_curvature = self.model_curvature if CC.latActive else self.curvature
+      self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, params.roll)
+      self.desired_curvature_rate = 0.0
+
+      lac_kwargs = {'lat_delay': lat_delay, 'curvature_limited': curvature_limited} if isinstance(self.LaC, LatControlTorque) else {}
       actuators.steer, actuators.steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, params,
                                                                              self.last_actuators, self.steer_limited, self.desired_curvature,
-                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'])
+                                                                             self.desired_curvature_rate, self.sm['liveLocationKalman'],
+                                                                             **lac_kwargs)
     else:
       lac_log = log.ControlsState.LateralDebugState.new_message()
       if self.sm.rcv_frame['testJoystick'] > 0:
@@ -726,6 +768,7 @@ class Controls:
     if not self.read_only and self.initialized:
       # send car controls over can
       self.last_actuators, can_sends = self.CI.apply(CC)
+      can_sends += self.diag_tx.update(sec_since_boot())
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
       CC.actuatorsOutput = self.last_actuators
       self.steer_limited = abs(CC.actuators.steer - CC.actuatorsOutput.steer) > 1e-2

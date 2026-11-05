@@ -5,6 +5,9 @@
 #include <string>
 
 #include <QDebug>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
 
 #ifndef QCOM
 #include "selfdrive/ui/qt/offroad/networking.h"
@@ -17,6 +20,7 @@
 #include "common/params.h"
 #include "common/util.h"
 #include "selfdrive/hardware/hw.h"
+#include "selfdrive/ui/qt/api.h"
 #include "selfdrive/ui/qt/widgets/controls.h"
 #include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
@@ -113,10 +117,53 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
                                  {"Lane Lines", "Laneless", "Auto"}));
 }
 
+// MIL and codes from one of livetuned's Obd.status() dicts
+static QString dtcSummary(const QJsonValue &v) {
+  if (!v.isObject()) return "?";
+  QJsonObject st = v.toObject();
+  QString codes;
+  if (st["codes"].isArray()) {
+    QStringList list;
+    for (auto c : st["codes"].toArray()) list << c.toString();
+    codes = list.isEmpty() ? "none" : list.join(", ");
+  } else {
+    codes = QString("%1 code(s)").arg(st["count"].toInt());
+  }
+  return QString("MIL %1, %2").arg(st["mil"].toBool() ? "on" : "off", codes);
+}
+
 DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   setSpacing(50);
   addItem(new LabelControl("Dongle ID", getDongleId().value_or("N/A")));
   addItem(new LabelControl("Serial", params.get("HardwareSerial").c_str()));
+
+  // usable onroad and while moving. livetuned does the OBD exchange (frames go out through
+  // controlsd), so this needs openpilot onroad and fails with a message otherwise
+  auto clearDtcBtn = new ButtonControl("Clear DTCs", "CLEAR",
+                                       "Clear the engine's trouble codes and turn off the check engine light. Also resets readiness monitors and fuel trims.");
+  HttpRequest *dtcRequest = new HttpRequest(this, false, 15000);
+  connect(clearDtcBtn, &ButtonControl::clicked, [=]() {
+    if (!dtcRequest->active() && ConfirmationDialog::confirm("Clear all DTCs?", this)) {
+      clearDtcBtn->setEnabled(false);
+      clearDtcBtn->setText("CLEARING");
+      QString port = QString::fromStdString(util::getenv("LIVE_TUNE_PORT", "8086"));
+      dtcRequest->sendRequest("http://127.0.0.1:" + port + "/api/clear_dtc", HttpRequest::Method::POST);
+    }
+  });
+  connect(dtcRequest, &HttpRequest::requestDone, [=](const QString &response, bool success) {
+    clearDtcBtn->setEnabled(true);
+    clearDtcBtn->setText("CLEAR");
+    QString msg;
+    if (!success) {
+      msg = "Live tuner not reachable: " + response;
+    } else {
+      QJsonObject d = QJsonDocument::fromJson(response.toUtf8()).object();
+      msg = d["ok"].toBool() ? "DTCs cleared\n" + dtcSummary(d["before"]) + " → " + dtcSummary(d["after"])
+                             : "Not cleared: " + d["msg"].toString();
+    }
+    ConfirmationDialog::alert(msg, this);
+  });
+  addItem(clearDtcBtn);
 
   // offroad-only buttons
 
@@ -155,7 +202,9 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
 
   QObject::connect(uiState(), &UIState::offroadTransition, [=](bool offroad) {
     for (auto btn : findChildren<ButtonControl *>()) {
-      btn->setEnabled(offroad);
+      if (btn != clearDtcBtn) {
+        btn->setEnabled(offroad);
+      }
     }
   });
 

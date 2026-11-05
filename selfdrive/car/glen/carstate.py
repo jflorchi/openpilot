@@ -13,10 +13,7 @@ from selfdrive.swaglog import cloudlog
 from common.conversions import Conversions as CV
 
 ZSS_SCALE = 0.021973997
-ZSS_MOUNT_OFFSET = 2.41  # ZSS mounting offset vs true center, measured after alignment
-ZSS_STILL_DEG = 1.0  # wheel counts as still within this many deg...
-ZSS_STILL_FRAMES = 50  # ...held for 0.5s at 100Hz
-ZSS_SANITY_DEG = 15.0  # disagreement with the stock sensor that means the ZSS lost its zero
+ZSS_MOUNT_OFFSET = 0.0  # the china-sas board stores its own centre (sas_tool.py zero)
 
 
 class CarState(CarStateBase):
@@ -36,9 +33,7 @@ class CarState(CarStateBase):
         self.acc_type = 1
 
         self.angle_offset = 0.
-        self.zss_offset = None
-        self.zss_still_ref = None
-        self.zss_still_frames = 0
+        self.zss_calibrated = None  # from the board's 0x25 status nibble, None until the first frame
         self.last_time = -1
         self.last_angle = 0
         self.last_rate = 0
@@ -67,50 +62,24 @@ class CarState(CarStateBase):
 
         ret.standstill = ret.vEgoRaw < 0.001
 
-        zss_angle = cp2.vl["SECONDARY_STEER_ANGLE"]["ANGLE"]
-        if cp2.vl["SECONDARY_STEER_ANGLE"]["SIGN"] == 1:
-            zss_angle = 65535 - zss_angle
-            zss_angle = 0 - zss_angle
-            zss_angle = zss_angle * ZSS_SCALE
-        else:
-            zss_angle = zss_angle * ZSS_SCALE
+        # The china-sas board replaced both the stock SAS and micro_sas: on bus 0 it sends the stock
+        # 0x25 (status nibble + 1.5 deg angle) and 0x23 (signed 32-bit, 360/16384 deg per count).
+        # 0x23 is only sent while its angle is valid; the 0x25 status nibble says whether it is
+        # (0 = centred, tracking and both magnet sensors agree; anything else = don't steer on it).
+        # ZORRO_STEER (the whole signed 32-bit field) is mis-signed by this libdbc (decodes as -2^32
+        # counts), so rebuild it from SIGN (bit 31) and the low 16 bits: exact for |angle| < 1440 deg.
+        zss_counts = cp0.vl["SECONDARY_STEER_ANGLE"]["ANGLE"]
+        if cp0.vl["SECONDARY_STEER_ANGLE"]["SIGN"] == 1:
+            zss_counts -= 65536
+        zss_angle = zss_counts * ZSS_SCALE
 
-        # The ZSS keeps its zero across ignition cycles, so ZSS_MOUNT_OFFSET (measured against true
-        # center after an alignment) is the accurate correction and is what we normally use. It only
-        # re-zeroes if the module loses power, and it zeroes to wherever the wheel is sitting at that
-        # moment -- reconnect it with the wheel turned and the reported angle is off by however far
-        # the wheel was turned.
-        #
-        # So sanity check the constant once, against the stock sensor, while the wheel is holding
-        # still. Agreement means the ZSS zero survived and we keep the aligned constant. Gross
-        # disagreement means it was re-zeroed, and we fall back to borrowing the stock sensor's zero
-        # -- coarser (1.5 deg/count) and only as accurate as the stock sensor, but drivable instead
-        # of hundreds of degrees out.
-        #
-        # The stillness gate matters: the sensors are on different buses at different rates (20Hz vs
-        # 80Hz), so with the wheel turning they disagree by tens of degrees from sampling skew alone.
-        # Checking then would trip the fallback spuriously.
-        stock_angle = cp0.vl["STEER_ANGLE_SENSOR"]["STEER_ANGLE"] + cp0.vl["STEER_ANGLE_SENSOR"]["STEER_FRACTION"]
-        if self.zss_offset is None:
-            if self.zss_still_ref is None or abs(zss_angle - self.zss_still_ref) > ZSS_STILL_DEG:
-                self.zss_still_ref = zss_angle
-                self.zss_still_frames = 0
-            else:
-                self.zss_still_frames += 1
-
-            if self.zss_still_frames >= ZSS_STILL_FRAMES and cp0.can_valid and cp2.can_valid:
-                if abs((zss_angle - ZSS_MOUNT_OFFSET) - stock_angle) <= ZSS_SANITY_DEG:
-                    self.zss_offset = ZSS_MOUNT_OFFSET
-                else:
-                    self.zss_offset = zss_angle - stock_angle
-                    cloudlog.error("ZSS lost its zero, falling back to the stock sensor's. "
-                                   "Re-zero it by power cycling the module with the wheel straight. "
-                                   f"zss={zss_angle:.2f} stock={stock_angle:.2f} offset={self.zss_offset:.2f}")
-
-            # sanity check hasn't run yet, so the constant is still unverified
-            ret.steeringAngleDeg = zss_angle - ZSS_MOUNT_OFFSET
-        else:
-            ret.steeringAngleDeg = zss_angle - self.zss_offset
+        if len(cp0.vl_all["STEER_ANGLE_SENSOR"]["STATUS"]):
+            sas_status = int(cp0.vl["STEER_ANGLE_SENSOR"]["STATUS"])
+            calibrated = sas_status == 0
+            if calibrated != self.zss_calibrated:
+                (cloudlog.info if calibrated else cloudlog.error)(f"china-sas valid={calibrated} status={sas_status}")
+            self.zss_calibrated = calibrated
+        ret.steeringAngleDeg = zss_angle - ZSS_MOUNT_OFFSET
 
         if self.last_time == -1:
             ret.steeringRateDeg = 0  # set to 0 since it isn't moving yet
@@ -134,7 +103,8 @@ class CarState(CarStateBase):
         ret.steeringTorqueEps = cp0.vl["STEER_TORQUE_SENSOR"]["STEER_TORQUE_EPS"] * self.eps_torque_scale
         # we could use the override bit from dbc, but it's triggered at too high torque values
         ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD
-        ret.steerFaultTemporary = cp0.vl["EPS_STATUS"]["LKA_STATE"] in (0, 9, 21, 25)
+        # don't steer on the board's angle unless its 0x25 status says it is valid
+        ret.steerFaultTemporary = cp0.vl["EPS_STATUS"]["LKA_STATE"] in (0, 9, 21, 25) or not self.zss_calibrated
         # 17 is a fault from a prolonged high torque delta between cmd and user
         ret.steerFaultPermanent = cp0.vl["EPS_STATUS"]["LKA_STATE"] == 17
 
@@ -173,6 +143,9 @@ class CarState(CarStateBase):
             ("TC_DISABLED", "ESP_CONTROL"),
             ("BRAKE_HOLD_ACTIVE", "ESP_CONTROL"),
             ("STEER_FRACTION", "STEER_ANGLE_SENSOR"),
+            ("STATUS", "STEER_ANGLE_SENSOR"),
+            ("SIGN", "SECONDARY_STEER_ANGLE"),
+            ("ANGLE", "SECONDARY_STEER_ANGLE"),
             ("STEER_RATE", "STEER_ANGLE_SENSOR"),
             ("STEER_TORQUE_DRIVER", "STEER_TORQUE_SENSOR"),
             ("STEER_TORQUE_EPS", "STEER_TORQUE_SENSOR"),
@@ -197,6 +170,7 @@ class CarState(CarStateBase):
             ("PCM_CRUISE_SM", 2),
             ("BRAKE_MODULE", 40),
             ("STEER_ANGLE_SENSOR", 80),
+            ("SECONDARY_STEER_ANGLE", 20),  # china-sas 0x23, 50Hz on bus 0
             ("WHEEL_SPEEDS_FRONT", 50),
             ("WHEEL_SPEEDS_REAR", 50),
             ("STEER_TORQUE_SENSOR", 50)
@@ -216,9 +190,6 @@ class CarState(CarStateBase):
     @staticmethod
     def get_body_can_parser(CP):
         signals = [
-            ("ZORRO_STEER", "SECONDARY_STEER_ANGLE"),
-            ("SIGN", "SECONDARY_STEER_ANGLE"),
-            ("ANGLE", "SECONDARY_STEER_ANGLE"),
             ("CRUISE_ACTIVE", "PCM_CRUISE"),
             ("CRUISE_STATE", "PCM_CRUISE"),
             ("GAS_RELEASED", "PCM_CRUISE"),
@@ -234,7 +205,6 @@ class CarState(CarStateBase):
             ("PCM_CRUISE", 4),
             ("PCM_CRUISE_2", 4),
             ("BLINKERS_STATE", 4),
-            ("SECONDARY_STEER_ANGLE", 20),
             ("GAS_SENSOR", 40)
         ]
         return CANParser(DBC[CP.carFingerprint]["pt"], signals, checks, 2)

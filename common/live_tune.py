@@ -49,25 +49,26 @@ class Knob:
 # value before controlsd has ever run. controlsd overwrites them from CarParams at startup
 # (write_defaults below), which is authoritative -- these are just the offroad fallback.
 #   latAccelFactor / friction / steerActuatorDelay: selfdrive/car/glen/interface.py
-#   kp / ki / kf:                                   set_torque_tune, latcontrol_torque.py
-#   lowSpeedFactor*:                                LOW_SPEED_FACTOR_*, latcontrol_torque.py
+#     (steerActuatorDelay is only lagd's starting point; unpinned, controlsd uses lagd's estimate)
+#   kp / ki / kf:                                   set_torque_tune, latcontrol_torque.py (upstream KP/KI)
+#   kpLowSpeedScale:                                LOW_SPEED_KP_SCALE, latcontrol_torque.py
 KNOBS = [
-  Knob("latAccelFactor", "Lat Accel Factor", 1.0, 5.0, 0.05, "torque", 3.6,
+  Knob("latAccelFactor", "Lat Accel Factor", 1.0, 5.0, 0.05, "torque", 3.117,
        desc="Lateral accel the car makes at full torque. Lower = more steer for the same request."),
-  Knob("friction", "Friction", 0.0, 0.20, 0.002, "torque", 0.012,
+  Knob("friction", "Friction", 0.0, 0.20, 0.002, "torque", 0.123,
        desc="Torque added in the direction of the error. Behaves like extra P around center."),
-  Knob("kp", "P gain", 0.0, 3.0, 0.05, "pid", 1.0,
-       desc="Proportional gain on lat accel error."),
-  Knob("ki", "I gain", 0.0, 1.0, 0.01, "pid", 0.1,
+  Knob("kp", "P gain @ 30+ m/s", 0.0, 3.0, 0.05, "pid", 0.8,
+       desc="Proportional gain on lat accel error. Scales upstream's speed table, which raises it at low speed."),
+  Knob("kpLowSpeedScale", "P scale @ <=10 m/s", 0.2, 1.0, 0.05, "pid", 0.5,
+       desc="Extra scale on the low-speed P gain, blended back to 1 by 17 m/s. Lower if bumps set off a "
+            "bang-bang wobble around town; 1.0 is upstream."),
+  Knob("ki", "I gain", 0.0, 1.0, 0.01, "pid", 0.15,
        desc="Integral gain. Too high wanders, too low holds an offset in long curves."),
   Knob("kf", "FF gain", 0.0, 2.0, 0.05, "pid", 1.0,
        desc="Feedforward scale. This is what does most of the steering."),
-  Knob("steerActuatorDelay", "Actuator Delay", 0.0, 0.60, 0.01, "plan", 0.30, unit="s",
-       desc="Lookahead. Sets the planner horizon and divides into psi, so it acts as a gain too."),
-  Knob("lowSpeedFactorLow", "Low Speed Factor @ 0-10 m/s", 0.0, 800.0, 10.0, "plan", 500.0,
-       desc="Curvature weighting in the error at low speed."),
-  Knob("lowSpeedFactorHigh", "Low Speed Factor @ 20 m/s", 0.0, 800.0, 10.0, "plan", 200.0,
-       desc="Curvature weighting in the error at highway speed."),
+  Knob("steerActuatorDelay", "Actuator Delay", 0.0, 0.60, 0.01, "plan", 0.12, unit="s",
+       desc="Actuator delay (+0.2 s, as lagd). Sets how far along the model's plan the target is taken and how long "
+            "the controller waits before judging the error. Unpinned, lagd's learned delay is used."),
 ]
 
 KNOBS_BY_KEY = {k.key: k for k in KNOBS}

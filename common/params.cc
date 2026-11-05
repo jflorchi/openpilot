@@ -136,6 +136,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"LastSystemShutdown", CLEAR_ON_MANAGER_START},
     {"LastUpdateException", CLEAR_ON_MANAGER_START},
     {"LastUpdateTime", PERSISTENT},
+    {"LiveDelay", PERSISTENT},
     {"LiveParameters", PERSISTENT},
     {"LiveTorqueCarParams", PERSISTENT},
     {"LiveTorqueParameters", PERSISTENT | DONT_LOG},

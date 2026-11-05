@@ -132,8 +132,11 @@ Two details that matter if this is ever automated:
   driveability until they relearn. Clearing every drive cycle keeps the car permanently
   relearning.
 - Freeze frame data is discarded, so the diagnostic trail for the fault is gone.
-- **Do not send Mode 04 while moving.** Gate on PID 0D reading 0 km/h, and ideally park/neutral.
-  The logged session did this correctly — the PID 0D read immediately before the clear (35.88s)
+- **Mode 04 while moving is allowed on purpose.** livetuned and the Device settings button used to
+  gate on standstill and PID 0D reading 0 km/h; that was dropped (Oct 2026) so the P0420 can be
+  cleared from the device instead of with a scan tool at speed. Whether this ECM accepts it while
+  moving is unverified; a refusal comes back as `7F 04 22` and is reported, not retried.
+  The logged scanner session cleared at standstill — the PID 0D read immediately before the clear (35.88s)
   returned `0x00`, and the fastest reading anywhere in that route was `0x48` = 72 km/h.
 
 ## Talking to the bus from a comma device

@@ -27,10 +27,11 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(car.CarParams.SafetyModel.allOutput)]
         ret.safetyConfigs[0].safetyParam = EPS_SCALE
 
-        # Toyota platform default. Was 0.30, which is ~2.5x every other torque controlled car in
-        # the tree and feeds get_lag_adjusted_curvature twice: it sets the lookahead horizon
+        # Toyota platform default (upstream 2017 Corolla). This is only the starting point now: lagd
+        # learns the delay from driving and controlsd uses its estimate, unless one is pinned in the
+        # web tuner. It feeds get_lag_adjusted_curvature twice: it sets the lookahead horizon
         # (delay + .2) and then divides into psi to produce the commanded curvature.
-        ret.steerActuatorDelay = 0.30
+        ret.steerActuatorDelay = 0.12
         ret.steerLimitTimer = 0.4
         ret.stoppingControl = True  # Toyota starts braking more when it thinks you want to stop
 
@@ -39,7 +40,9 @@ class CarInterface(CarInterfaceBase):
             ret.steerRatio = 18.27
             tire_stiffness_factor = 0.444
             ret.mass = 2745. * CV.LB_TO_KG + STD_CARGO_KG
-            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.6, FRICTION=0.012, steering_angle_deadzone_deg=0.0)
+            # upstream 2017 Corolla (opendbc torque_data params.toml, TOYOTA_COROLLA); torqued learns from here
+            set_lat_tune(ret.lateralTuning, LatTunes.TORQUE, MAX_LAT_ACCEL=3.117154369115421, FRICTION=0.12289685869250652,
+                         steering_angle_deadzone_deg=0.0)
 
         ret.steerRateCost = 1.
         ret.centerToFront = ret.wheelbase * 0.44
