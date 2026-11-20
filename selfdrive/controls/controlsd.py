@@ -21,6 +21,7 @@ from selfdrive.controls.lib.drive_helpers import update_v_cruise, initialize_v_c
 from selfdrive.controls.lib.drive_helpers import clip_curvature, get_curvature_from_plan
 from selfdrive.controls.lib.latcontrol import LatControl
 from selfdrive.controls.lib.longcontrol import LongControl
+from selfdrive.controls.lib.lane_offset import LaneOffset, LANE_OFFSET_TARGET
 from selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from selfdrive.controls.lib.latcontrol_indi import LatControlINDI
 from selfdrive.controls.lib.latcontrol_angle import LatControlAngle
@@ -202,6 +203,8 @@ class Controls:
     self.desired_curvature = 0.0
     self.desired_curvature_rate = 0.0  # upstream dropped this; kept at 0 for controlsState
     self.model_curvature = 0.0  # upstream's modelV2.action.desiredCurvature
+    self.lane_offset = LaneOffset()
+    self.lane_offset_curvature = 0.0
     self.curvature = 0.0
 
     # TODO: no longer necessary, aside from process replay
@@ -645,9 +648,14 @@ class Controls:
       lat_delay = self.get_lat_delay()
       if self.sm.updated['modelV2']:
         self.model_curvature = self.get_model_curvature(CS.vEgo, lat_delay)
+        # slow trim of where in the lane the car sits (camera offset), see lane_offset.py
+        lane_changing = self.sm['lateralPlan'].laneChangeState != LaneChangeState.off
+        self.lane_offset_curvature = self.lane_offset.update(self.sm['modelV2'], CS.vEgo, CC.latActive, CS.steeringPressed,
+                                                             lane_changing, self.model_curvature * CS.vEgo ** 2,
+                                                             live_tune.get('laneOffset', LANE_OFFSET_TARGET))
       self.curvature = -self.VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)
       # Reset desired curvature to current to avoid violating the limits on engage
-      new_desired_curvature = self.model_curvature if CC.latActive else self.curvature
+      new_desired_curvature = self.model_curvature + self.lane_offset_curvature if CC.latActive else self.curvature
       self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, params.roll)
       self.desired_curvature_rate = 0.0
 

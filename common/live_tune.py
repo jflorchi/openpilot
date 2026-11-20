@@ -69,6 +69,16 @@ KNOBS = [
   Knob("steerActuatorDelay", "Actuator Delay", 0.0, 0.60, 0.01, "plan", 0.12, unit="s",
        desc="Actuator delay (+0.2 s, as lagd). Sets how far along the model's plan the target is taken and how long "
             "the controller waits before judging the error. Unpinned, lagd's learned delay is used."),
+  # selfdrive/controls/lib/lane_offset.py (LANE_OFFSET_TARGET)
+  Knob("laneOffset", "Lane position", -0.30, 0.30, 0.01, "lane", 0.08, unit="m",
+       desc="Where the lane centre should sit relative to the camera, + = to its right (car further left). The "
+            "comma two camera is ~6 cm left of the car's centre line. 0 turns the trim off and lets the model pick."),
+  # selfdrive/car/glen/values.py PEDAL_HOLD / PEDAL_GAIN tables
+  Knob("pedalHoldScale", "Hold pedal scale", 0.5, 1.5, 0.05, "long", 1.0,
+       desc="Scales the pedal that holds speed on the flat. Raise it if it still settles under the set speed, "
+            "lower it if it surges past on engage."),
+  Knob("pedalGainScale", "Pedal gain scale", 0.5, 2.0, 0.05, "long", 1.0,
+       desc="Scales the extra pedal per m/s^2 requested. Raise it if it's lazy getting up to speed, lower it if speed hunts."),
 ]
 
 KNOBS_BY_KEY = {k.key: k for k in KNOBS}

@@ -32,7 +32,17 @@ class LatTunes(Enum):
 ###### LONG ######
 def set_long_tune(tune, name):
   # Improved longitudinal tune
-  if name == LongTunes.TSS2 or name == LongTunes.PEDAL:
+  if name == LongTunes.PEDAL:
+    # Same gains as TSS2, which assume the car makes the accel it's asked for. The pedal map in carcontroller
+    # now makes that roughly true (plant gain ~0.8-0.9, hold pedal built in), so the integrator only trims.
+    # No deadzone: it let the speed sit 0.5 km/h off before the PID even reacted.
+    tune.deadzoneBP = [0.]
+    tune.deadzoneV = [0.]
+    tune.kpBP = [0., 5., 20.]
+    tune.kpV = [1.3, 1.0, 0.7]
+    tune.kiBP = [0., 5., 12., 20., 27.]
+    tune.kiV = [.35, .23, .20, .17, .1]
+  elif name == LongTunes.TSS2:
     tune.deadzoneBP = [0., 8.05]
     tune.deadzoneV = [.0, .14]
     tune.kpBP = [0., 5., 20.]

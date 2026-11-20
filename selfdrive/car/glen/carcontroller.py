@@ -1,11 +1,28 @@
 from cereal import car
+from common.live_tune import LiveTuneReader
 from common.numpy_fast import clip, interp
+from common.realtime import sec_since_boot
 from opendbc.can.packer import CANPacker
 from selfdrive.car import apply_toyota_steer_torque_limits, make_can_msg
 from selfdrive.car.glen.glencan import create_steer_command, create_gas_interceptor_command
-from selfdrive.car.glen.values import MIN_ACC_SPEED, PEDAL_TRANSITION, CarControllerParams
+from selfdrive.car.glen.values import CarControllerParams
 
 VisualAlert = car.CarControl.HUDControl.VisualAlert
+
+
+def pedal_hold_and_gain(v_ego, hold_scale=1.0, gain_scale=1.0):
+    """Interceptor pedal = hold + accel * gain (see CarControllerParams). Scales come from the web tuner."""
+    hold = interp(v_ego, CarControllerParams.PEDAL_HOLD_BP, CarControllerParams.PEDAL_HOLD_V) * hold_scale
+    gain = interp(v_ego, CarControllerParams.PEDAL_GAIN_BP, CarControllerParams.PEDAL_GAIN_V) * gain_scale
+    return hold, gain
+
+
+def coast_accel(v_ego):
+    """The accel command at which the pedal reaches 0. Any lower request does nothing (no brakes), so the long PID
+    is limited here; below it, the integrator wound to -3.5 m/s^2 while the car sat above the set speed and then
+    took a minute to unwind."""
+    hold, gain = pedal_hold_and_gain(v_ego)
+    return -hold / gain
 
 
 class CarController():
@@ -20,18 +37,18 @@ class CarController():
         self.gas = 0
         self.accel = 0
         self.last_enabled = False
+        self.live_tune = LiveTuneReader()
 
     def update(self, CC, CS):
         actuators = CC.actuators
         hud_control = CC.hudControl
         pcm_cancel_cmd = CC.cruiseControl.cancel
 
-        # gas and brake
+        # gas only: there is no brake actuator, so anything below the hold pedal is a coast
         if self.CP.enableGasInterceptor and CC.longActive:
-            MAX_INTERCEPTOR_GAS = 0.5
-            PEDAL_SCALE = interp(CS.out.vEgo, [0.0, 40.0], [0.15, 0.45, 0.0])
-            pedal_command = (actuators.accel * PEDAL_SCALE)
-            interceptor_gas_cmd = clip(pedal_command, 0., MAX_INTERCEPTOR_GAS)
+            tune = self.live_tune.update(sec_since_boot())
+            hold, gain = pedal_hold_and_gain(CS.out.vEgo, tune.get('pedalHoldScale', 1.0), tune.get('pedalGainScale', 1.0))
+            interceptor_gas_cmd = clip(hold + actuators.accel * gain, 0., CarControllerParams.MAX_INTERCEPTOR_GAS)
         else:
             interceptor_gas_cmd = 0.
         pcm_accel_cmd = clip(actuators.accel, CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX)

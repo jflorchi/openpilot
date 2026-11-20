@@ -4,6 +4,7 @@ from selfdrive.car import STD_CARGO_KG, scale_rot_inertia, scale_tire_stiffness,
   get_safety_config
 from selfdrive.car.glen.tunes import LatTunes, LongTunes, set_long_tune, set_lat_tune
 from selfdrive.car.glen.values import CAR, EPS_SCALE, CarControllerParams
+from selfdrive.car.glen.carcontroller import coast_accel
 from selfdrive.car.interfaces import CarInterfaceBase
 from common.conversions import Conversions as CV
 
@@ -14,7 +15,8 @@ EventName = car.CarEvent.EventName
 class CarInterface(CarInterfaceBase):
     @staticmethod
     def get_pid_accel_limits(CP, current_speed, cruise_speed):
-        return CarControllerParams.ACCEL_MIN, CarControllerParams.ACCEL_MAX
+        # gas only: the PID's floor is the request that already gives zero pedal, so it can't wind up below it
+        return max(CarControllerParams.ACCEL_MIN, coast_accel(current_speed)), CarControllerParams.ACCEL_MAX
 
     @staticmethod
     def get_params(candidate, fingerprint=gen_empty_fingerprint(), car_fw=None, disable_radar=True):
