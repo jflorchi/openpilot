@@ -58,17 +58,19 @@ def rename_input(old, new):
         n.input[i] = new
 
 # ---- 1. host-managed history: new inputs and rewiring ----
+# (skipped for a split vision + policy model already merged into this contract by merge_split_models.py)
 f32 = TensorProto.FLOAT
 old_inputs = {i.name: i for i in g.input}
-del g.input[:]
-g.input.extend([helper.make_tensor_value_info('imgs', f32, [1, 24, 128, 256]),
-                helper.make_tensor_value_info('desire_tokens', f32, [1, 200]),
-                helper.make_tensor_value_info('feat_hist', f32, [1, 8, 512]),
-                old_inputs['traffic_convention'], old_inputs['action_t']])
-rename_input('model/cat', 'imgs')
-rename_input('model/p_view', 'desire_tokens')
-new_nodes.append(helper.make_node('Concat', ['feat_hist', 'model/hidden_t'], ['c2port/p_index'], axis=1, name='c2port/p_index'))
-rename_input('model/p_index', 'c2port/p_index')
+if 'imgs' not in old_inputs:
+  del g.input[:]
+  g.input.extend([helper.make_tensor_value_info('imgs', f32, [1, 24, 128, 256]),
+                  helper.make_tensor_value_info('desire_tokens', f32, [1, 200]),
+                  helper.make_tensor_value_info('feat_hist', f32, [1, 8, 512]),
+                  old_inputs['traffic_convention'], old_inputs['action_t']])
+  rename_input('model/cat', 'imgs')
+  rename_input('model/p_view', 'desire_tokens')
+  new_nodes.append(helper.make_node('Concat', ['feat_hist', 'model/hidden_t'], ['c2port/p_index'], axis=1, name='c2port/p_index'))
+  rename_input('model/p_index', 'c2port/p_index')
 keep_out = [o for o in g.output if o.name == 'outputs']
 del g.output[:]
 g.output.extend(keep_out)

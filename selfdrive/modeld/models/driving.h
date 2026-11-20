@@ -256,16 +256,30 @@ constexpr int NET_OUTPUT_SIZE = OUTPUT_SIZE + TEMPORAL_SIZE;
 
 #ifdef C2PORT
 // Current upstream supercombo ported to the comma two (see c2port/README.md). The model has no recurrent state;
-// modeld keeps its history buffers. Output layout (floats), from the model's output_slices metadata:
+// modeld keeps its history buffers. Two port contracts exist, told apart by the thneed's output size; output layouts
+// (floats) from each model's output_slices metadata:
 namespace c2port {
-  constexpr int OUTPUT_SIZE = 2576;
-  constexpr int META = 0, DESIRE_PRED = 55, POSE = 87, LANE_LINES = 117, LANE_LINES_PROB = 645, ROAD_EDGES = 653,
-                LEAD = 917, LEAD_PROB = 1061, HIDDEN = 1064, PLAN = 1576, DESIRE_STATE = 2566;
+  struct Layout {
+    int output_size;
+    int desire_windows;  // rows of 'desire_tokens' (each 25 pooled tokens x 8), 1 or 9
+    int META, DESIRE_PRED, POSE, LANE_LINES, LANE_LINES_PROB, ROAD_EDGES, LEAD, LEAD_PROB, HIDDEN, PLAN, DESIRE_STATE;
+  };
+  // Sep 2026 supercombo and the merged split models (MacroStiff, WMI): desire_tokens [1,200], no action_t
+  constexpr Layout LAYOUT_2576 = {2576, 1, 0, 55, 87, 117, 645, 653, 917, 1061, 1064, 1576, 2566};
+  // Cheddar (Nov 2026, make_cheddar_c2.py): desire_tokens [9,200], action_t [1,2]
+  constexpr Layout LAYOUT_2580 = {2580, 9, 800, 855, 887, 0, 528, 536, 1907, 2051, 2066, 917, 2054};
+  constexpr int MAX_OUTPUT_SIZE = 2580;
+  constexpr int ROAD_EDGES_LEN = 264, LEAD_LEN = 144;
   constexpr int PIXELS = 128 * 256;
   constexpr int FRAME_SIZE = PIXELS * 8;         // one camera frame, channel-last: 6 YUV channels + 2 unused per pixel
   // model input 'imgs' [1,128,256,32]: per pixel narrow t-4, narrow t, wide t-4, wide t (8 floats each)
   constexpr int RING = 5;                        // frames t-4 .. t
-  constexpr int DESIRE_HIST = 100, FEAT_HIST = 96, FEAT_LEN = 512, FEAT_TOKENS = 8;
+  constexpr int DESIRE_TOKENS = 25, MAX_DESIRE_WINDOWS = 9;
+  constexpr int MAX_DESIRE_HIST = 4 * (DESIRE_TOKENS + MAX_DESIRE_WINDOWS - 1);  // 132 pulses, max-pooled by 4
+  constexpr int FEAT_HIST = 96, FEAT_LEN = 512, FEAT_TOKENS = 8;
+  // upstream modeld's action_t: delay + frame delay (DT_MDL) + half a frame
+  constexpr float FRAME_DELAY = 0.05f, ACTION_DELAY = 0.025f;
+  constexpr float LONG_ACTION_T = 0.15f + 0.3f + FRAME_DELAY + ACTION_DELAY;  // longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   // input normalization, applied by loadyuv: (pixel - 127.5) / 63.75
   constexpr float INPUT_SCALE = 1.0f / 63.75f, INPUT_OFFSET = -127.5f / 63.75f;
 
@@ -294,14 +308,17 @@ struct ModelState {
 #ifdef C2PORT
   std::unique_ptr<Thneed> thneed;
   bool recorded = false;
-  int in_imgs, in_desire, in_feat, in_traffic;              // thneed input indices
-  std::array<float, c2port::OUTPUT_SIZE> raw = {};         // model output
+  int in_imgs, in_desire, in_feat, in_traffic, in_action_t;  // thneed input indices (in_action_t -1 if absent)
+  c2port::Layout layout;
+  float action_t[2] = {0.395f, c2port::LONG_ACTION_T};      // [lateral, longitudinal] action time, set by modeld
+  std::array<float, c2port::MAX_OUTPUT_SIZE> raw = {};     // model output
   cl_mem ring[2] = {};                                     // narrow / wide raw pixels on the GPU: RING frames each
   std::unique_ptr<float[]> imgs;                           // host copy of the model input 'imgs', only for C2PORT_DUMP
   int ring_head = 0;
-  std::array<float, c2port::DESIRE_HIST * DESIRE_LEN> desire_hist = {};
+  int desire_hist_len = 0;                                 // 4 * (25 + desire_windows - 1)
+  std::array<float, c2port::MAX_DESIRE_HIST * DESIRE_LEN> desire_hist = {};
   std::array<float, c2port::FEAT_HIST * c2port::FEAT_LEN> feat_hist = {};
-  std::array<float, 25 * DESIRE_LEN> desire_tokens = {};
+  std::array<float, c2port::MAX_DESIRE_WINDOWS * c2port::DESIRE_TOKENS * DESIRE_LEN> desire_tokens = {};
   std::array<float, c2port::FEAT_TOKENS * c2port::FEAT_LEN> feat_tokens = {};
 #endif
 };

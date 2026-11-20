@@ -42,10 +42,24 @@ void model_init(ModelState* s, cl_device_id device_id, cl_context context) {
   s->in_desire = s->thneed->input_index("desire_tokens");
   s->in_feat = s->thneed->input_index("feat_hist");
   s->in_traffic = s->thneed->input_index("traffic_convention");
+  s->in_action_t = s->thneed->input_index("action_t");
   assert(s->in_imgs >= 0 && s->in_desire >= 0 && s->in_feat >= 0 && s->in_traffic >= 0);
+  // which port contract: by output size
+  size_t out_bytes = 0;
+  CL_CHECK(clGetMemObjectInfo(s->thneed->output, CL_MEM_SIZE, sizeof(out_bytes), &out_bytes, NULL));
+  if (out_bytes == c2port::LAYOUT_2580.output_size * sizeof(float)) {
+    s->layout = c2port::LAYOUT_2580;
+  } else {
+    assert(out_bytes == c2port::LAYOUT_2576.output_size * sizeof(float));
+    s->layout = c2port::LAYOUT_2576;
+  }
+  s->desire_hist_len = 4 * (c2port::DESIRE_TOKENS + s->layout.desire_windows - 1);
+  LOGW("c2port model: %d outputs, %d desire windows, action_t %s", s->layout.output_size, s->layout.desire_windows,
+       s->in_action_t >= 0 ? "yes" : "no");
   assert(s->thneed->input_sizes[s->in_imgs] == 4 * c2port::FRAME_SIZE * sizeof(float));
-  assert(s->thneed->input_sizes[s->in_desire] == s->desire_tokens.size() * sizeof(float));
+  assert(s->thneed->input_sizes[s->in_desire] == s->layout.desire_windows * c2port::DESIRE_TOKENS * DESIRE_LEN * sizeof(float));
   assert(s->thneed->input_sizes[s->in_feat] == s->feat_tokens.size() * sizeof(float));
+  assert(s->in_action_t < 0 || s->thneed->input_sizes[s->in_action_t] == sizeof(s->action_t));
 
   // frames before the first 5 are all-zero pixels, like the upstream model's zero-initialized image queue
   std::vector<uint8_t> zero_frames(c2port::RING * c2port::PIXELS * 8, 0);
@@ -89,6 +103,10 @@ void model_init(ModelState* s, cl_device_id device_id, cl_context context) {
 static void c2port_repack(ModelState *s) {
   using namespace c2port;
   const float *r = s->raw.data();
+  const auto &L = s->layout;
+  const int META = L.META, DESIRE_PRED = L.DESIRE_PRED, POSE = L.POSE, LANE_LINES = L.LANE_LINES,
+            LANE_LINES_PROB = L.LANE_LINES_PROB, ROAD_EDGES = L.ROAD_EDGES, LEAD = L.LEAD, LEAD_PROB = L.LEAD_PROB,
+            PLAN = L.PLAN, DESIRE_STATE = L.DESIRE_STATE;
   auto &out = *reinterpret_cast<ModelOutput*>(s->output.data());
 
   // plan: one hypothesis (means + log-stds, same 15-value element layout); make it the best of the 5
@@ -105,10 +123,13 @@ static void c2port_repack(ModelState *s) {
   auto &lanes = const_cast<ModelOutputLaneLines&>(out.lane_lines);
   std::memcpy(&lanes.mean, r + LANE_LINES, sizeof(lanes.mean) + sizeof(lanes.std));
   std::memcpy(&lanes.prob, r + LANE_LINES_PROB, sizeof(lanes.prob));
-  static_assert(sizeof(ModelOutputLaneLines::mean) * 2 == (LANE_LINES_PROB - LANE_LINES) * sizeof(float));
+  static_assert(sizeof(ModelOutputLaneLines::mean) * 2 == (LAYOUT_2576.LANE_LINES_PROB - LAYOUT_2576.LANE_LINES) * sizeof(float));
+  static_assert(sizeof(ModelOutputLaneLines::mean) * 2 == (LAYOUT_2580.LANE_LINES_PROB - LAYOUT_2580.LANE_LINES) * sizeof(float));
   auto &edges = const_cast<ModelOutputRoadEdges&>(out.road_edges);
-  std::memcpy(&edges, r + ROAD_EDGES, (LEAD - ROAD_EDGES) * sizeof(float));
-  static_assert(sizeof(ModelOutputRoadEdges) == (LEAD - ROAD_EDGES) * sizeof(float));
+  std::memcpy(&edges, r + ROAD_EDGES, ROAD_EDGES_LEN * sizeof(float));
+  static_assert(sizeof(ModelOutputRoadEdges) == ROAD_EDGES_LEN * sizeof(float));
+  static_assert(LAYOUT_2576.LEAD - LAYOUT_2576.ROAD_EDGES == ROAD_EDGES_LEN && LAYOUT_2580.META - LAYOUT_2580.ROAD_EDGES == ROAD_EDGES_LEN);
+  static_assert(LAYOUT_2580.LEAD_PROB - LAYOUT_2580.LEAD == LEAD_LEN && LAYOUT_2576.LEAD_PROB - LAYOUT_2576.LEAD == LEAD_LEN);
 
   // stop lines: not produced by this model
   auto &stop = const_cast<ModelOutputStopLines&>(out.stop_lines);
@@ -146,15 +167,21 @@ static void c2port_repack(ModelState *s) {
 ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const mat3 &transform, const mat3 &transform_wide,
                          bool prepare_only) {
   using namespace c2port;
-  // desire history (pulses), pooled to 25 tokens (max over groups of 4)
-  std::memmove(s->desire_hist.data(), s->desire_hist.data() + DESIRE_LEN, (DESIRE_HIST - 1) * DESIRE_LEN * sizeof(float));
-  std::memcpy(s->desire_hist.data() + (DESIRE_HIST - 1) * DESIRE_LEN, s->pulse_desire, DESIRE_LEN * sizeof(float));
-  for (int t = 0; t < 25; t++) {
+  // desire history (pulses, current one last), max-pooled over groups of 4 into 25 + W - 1 tokens; window w of the
+  // model input is tokens w .. w+24 (W = 1: the 25 tokens; Cheddar, W = 9: one window per policy token)
+  const int HIST = s->desire_hist_len, W = s->layout.desire_windows, NTOK = DESIRE_TOKENS + W - 1;
+  std::memmove(s->desire_hist.data(), s->desire_hist.data() + DESIRE_LEN, (HIST - 1) * DESIRE_LEN * sizeof(float));
+  std::memcpy(s->desire_hist.data() + (HIST - 1) * DESIRE_LEN, s->pulse_desire, DESIRE_LEN * sizeof(float));
+  float pooled[(DESIRE_TOKENS + MAX_DESIRE_WINDOWS - 1) * DESIRE_LEN];
+  for (int t = 0; t < NTOK; t++) {
     for (int d = 0; d < DESIRE_LEN; d++) {
       float m = s->desire_hist[(4 * t) * DESIRE_LEN + d];
       for (int k = 1; k < 4; k++) m = std::max(m, s->desire_hist[(4 * t + k) * DESIRE_LEN + d]);
-      s->desire_tokens[t * DESIRE_LEN + d] = m;
+      pooled[t * DESIRE_LEN + d] = m;
     }
+  }
+  for (int w = 0; w < W; w++) {
+    std::memcpy(s->desire_tokens.data() + w * DESIRE_TOKENS * DESIRE_LEN, pooled + w * DESIRE_LEN, DESIRE_TOKENS * DESIRE_LEN * sizeof(float));
   }
 
   // frames: narrow and wide (the narrow camera again on the comma two), each into its ring at ring_head, and with the
@@ -194,6 +221,7 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
   finputs[s->in_desire] = s->desire_tokens.data();
   finputs[s->in_feat] = s->feat_tokens.data();
   finputs[s->in_traffic] = s->traffic_convention;
+  if (s->in_action_t >= 0) finputs[s->in_action_t] = s->action_t;
   s->thneed->write_inputs(finputs.data());
   std::vector<float*> no_copy(finputs.size(), nullptr);  // inputs are already written; skip execute()'s memcpy
   if (!s->recorded) {
@@ -222,14 +250,15 @@ ModelOutput* c2port_eval(ModelState *s, VisionBuf *buf, VisionBuf *wbuf, const m
     CL_CHECK(clEnqueueReadBuffer(s->thneed->command_queue, s->thneed->input_clmem[s->in_imgs], CL_TRUE, 0,
                                  4 * FRAME_SIZE * sizeof(float), s->imgs.get(), 0, NULL, NULL));
     dump("imgs", s->imgs.get(), 4 * FRAME_SIZE * sizeof(float));
-    dump("desire", s->desire_tokens.data(), sizeof(s->desire_tokens));
+    dump("desire", s->desire_tokens.data(), W * DESIRE_TOKENS * DESIRE_LEN * sizeof(float));
     dump("feat", s->feat_tokens.data(), sizeof(s->feat_tokens));
     dump("traffic", s->traffic_convention, sizeof(s->traffic_convention));
-    dump("out", s->raw.data(), sizeof(s->raw));
+    dump("action_t", s->action_t, sizeof(s->action_t));
+    dump("out", s->raw.data(), s->layout.output_size * sizeof(float));
     dumped++;
   }
 
-  push_feature(s->raw.data() + HIDDEN);
+  push_feature(s->raw.data() + s->layout.HIDDEN);
   c2port_repack(s);
   return (ModelOutput*)&s->output;
 }

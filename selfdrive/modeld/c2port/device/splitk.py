@@ -7,7 +7,11 @@ Here S threads share one output channel, each takes every S-th input channel, an
 memory. The kernel signature and the fused epilogue (_ewop) are kept, so the thneed's args are unchanged; only the
 program source and the work sizes are rewritten.
 
-For each candidate kernel this runs the model up to it on real frames, times the original and a few (S, workgroup)
+Matmuls over a few rows (Cheddar's 9-token policy, [9,512] x W) get a second, row-blocked variant: tinygrad runs one
+thread per (channel, row), so the weights are read once per row. There, each of the S lanes of a channel reads its
+weights once and accumulates every row; after the local-memory reduction lane r writes row r through the same epilogue.
+
+For each candidate kernel this runs the model up to it on real frames, times the original and a few (mode, S, workgroup)
 configs, checks each against the original's output and keeps the fastest one that matches.
 
 usage: splitk.py in.thneed real_frames.npz out.thneed [report.json]
@@ -99,7 +103,66 @@ def splitk_source(src, S, WG):
   return src[:src.index(BODY_START)] + body + src[src.index(BODY_END):]
 
 
-def configs(packed_in, packed_out):
+def rowblock_source(src, S, WG, R):
+  """Same kernel, all R rows per channel group: dim0 = packed output channel * S, one workgroup row; lane r < R writes row r."""
+  zero = ' '.join(f'acc{r} = (float4)(0, 0, 0, 0);' for r in range(R))
+  fma = '\n'.join(f'''    inputLocation.y = {r}; iv = read_imagef(input, smp, inputLocation);
+    acc{r}.x += iv.x * w0.x; acc{r}.x += iv.y * w0.y; acc{r}.x += iv.z * w0.z; acc{r}.x += iv.w * w0.w;
+    acc{r}.y += iv.x * w1.x; acc{r}.y += iv.y * w1.y; acc{r}.y += iv.z * w1.z; acc{r}.y += iv.w * w1.w;
+    acc{r}.z += iv.x * w2.x; acc{r}.z += iv.y * w2.y; acc{r}.z += iv.z * w2.z; acc{r}.z += iv.w * w2.w;
+    acc{r}.w += iv.x * w3.x; acc{r}.w += iv.y * w3.y; acc{r}.w += iv.z * w3.z; acc{r}.w += iv.w * w3.w;''' for r in range(R))
+  store = ' '.join(f'partial[{r * WG} + lid] = acc{r};' for r in range(R))
+  add = ' '.join(f'partial[{r * WG} + lid] += partial[{r * WG} + lid + s];' for r in range(R))
+  body = f'''  float4 outputValues[NUM_OUTPUTS];
+  for (short i = 1; i < NUM_OUTPUTS; ++i) {{
+    outputValues[i] = (float4)(0, 0, 0, 0);
+  }}
+
+  const int lid = get_local_id(0);
+  const short k = lid % {S};
+  short packedOutputChannel = get_global_id(0) / {S};
+  short startOutputColumn = 0;
+  short groupNum = (packedOutputChannel / numPackedOutputChannelsForGroup);
+  short startPackedInputChannel = mul24(groupNum, numPackedInputChannelsForGroup);
+
+  int2 inputLocation;
+  int2 weightLocation;
+  weightLocation.y = packedOutputChannel;
+
+  float4 {", ".join(f"acc{r}" for r in range(R))};
+  {zero}
+  float4 iv;
+  for (short packedInputChannel = k; packedInputChannel < numPackedInputChannelsForGroup; packedInputChannel += {S}) {{
+    inputLocation.x = startPackedInputChannel + packedInputChannel;
+    weightLocation.x = packedInputChannel * 4;
+    float4 w0 = read_imagef(weights, smp, weightLocation); ++weightLocation.x;
+    float4 w1 = read_imagef(weights, smp, weightLocation); ++weightLocation.x;
+    float4 w2 = read_imagef(weights, smp, weightLocation); ++weightLocation.x;
+    float4 w3 = read_imagef(weights, smp, weightLocation);
+{fma}
+  }}
+
+  __local float4 partial[{WG * R}];
+  {store}
+  barrier(CLK_LOCAL_MEM_FENCE);
+  for (short s = {S // 2}; s > 0; s >>= 1) {{
+    if (k < s) {{ {add} }}
+    barrier(CLK_LOCAL_MEM_FENCE);
+  }}
+  if (k >= {R}) return;
+  outputValues[0] = partial[k * {WG} + lid - k];
+  short outputRow = k;
+
+'''
+  return src[:src.index(BODY_START)] + body + src[src.index(BODY_END):]
+
+
+MAX_ROWBLOCK_ROWS = 16
+ROWBLOCK_LOCAL = 32768  # bytes of local memory for the partial sums (Adreno 530: 32 kB per workgroup)
+
+
+def configs(packed_in, packed_out, rows):
+  """(mode, S, WG): mode 'k' = split-K (one row per thread), 'r' = row-blocked (all rows per channel group)"""
   for S in SPLITS:
     if S > packed_in:
       continue
@@ -109,7 +172,17 @@ def configs(packed_in, packed_out):
         W //= 2
       if W < 1:
         continue
-      yield S, W * S
+      yield 'k', S, W * S
+      if 1 < rows <= MAX_ROWBLOCK_ROWS and S >= rows and W * S * rows * 16 <= ROWBLOCK_LOCAL:
+        yield 'r', S, W * S
+
+
+def make_source(src, mode, S, WG, rows):
+  return splitk_source(src, S, WG) if mode == 'k' else rowblock_source(src, S, WG, rows)
+
+
+def work_sizes(mode, S, WG, gws):
+  return ((gws[0] * S, gws[1], gws[2]) if mode == 'k' else (gws[0] * S, 1, 1)), (WG, 1, 1)
 
 
 def main():
@@ -132,8 +205,8 @@ def main():
   imgs = (d['imgs0'].astype(np.float32) - 127.5) / 63.75
   fr = imgs.reshape(4, 6, 128, 256).transpose(2, 3, 0, 1)
   imgs = np.concatenate([fr, np.zeros((128, 256, 4, 2), np.float32)], -1).reshape(1, 128, 256, 32)
-  feed = {'imgs': imgs, 'desire_tokens': d['desire0'], 'feat_hist': d['feat0'],
-          'traffic_convention': np.array([[1, 0]], np.float32), 'action_t': np.array([[0.275, 0.525]], np.float32)}
+  from port_feed import feed as port_feed
+  feed = port_feed(d, 0, {k: v[1] // 4 for k, v in inputs.items()}, imgs)
   for name, (buf, size) in inputs.items():
     cl.enqueue_copy(q, buf, np.ascontiguousarray(feed[name], dtype=np.float32))
 
@@ -179,24 +252,23 @@ def main():
                                          'rows': shape(src, 'numOutputRows')})
     res['base'] += base_ms
     res['instances'] += 1
-    for S, WG in configs(res['packed_in'], res['packed_out']):
-      key = f'{S},{WG}'
+    for mode, S, WG in configs(res['packed_in'], res['packed_out'], res['rows']):
+      key = f'{mode},{S},{WG}'
       if key not in res['cfg']:
         res['cfg'][key] = {'ms': 0.0, 'err': 0.0, 'ok': True}
       c = res['cfg'][key]
       if not c['ok']:
         continue
       try:
-        prog = cl.Program(ctx, splitk_source(src, S, WG)).build()
+        prog = cl.Program(ctx, make_source(src, mode, S, WG, res['rows'])).build()
         nk = getattr(prog, k['name'])
         set_args(nk, k)
         keep.append((prog, nk))
-        ngws = (gws[0] * S, gws[1], gws[2])
-        nlws = (WG, 1, 1)
+        ngws, nlws = work_sizes(mode, S, WG, gws)
         ms = time_kernel(nk, ngws, nlws)
         err = float(np.linalg.norm(read_out(k) - ref) / ref_norm)
       except Exception as e:
-        print(f'{k["name"]} S={S} WG={WG}: {type(e).__name__} {str(e)[:200]}')
+        print(f'{k["name"]} {mode} S={S} WG={WG}: {type(e).__name__} {str(e)[:200]}')
         c['ok'] = False
         continue
       c['ms'] += ms
@@ -213,22 +285,24 @@ def main():
     best = min(ok, key=lambda c: ok[c]['ms']) if ok else None
     res['best'] = best
     if best and ok[best]['ms'] < MIN_GAIN * res['base']:
-      chosen[name] = tuple(int(x) for x in best.split(','))
+      mode, S, WG = best.split(',')
+      chosen[name] = (mode, int(S), int(WG))
     bms = ok[best]['ms'] if best else float('nan')
     print(f'{name:16s} x{res["instances"]} in {res["packed_in"]:3d} out {res["packed_out"]:3d} rows {res["rows"]}: '
-          f'{res["base"]:.3f} ms -> {bms:.3f} ms (S,WG={best}, err {ok[best]["err"] if best else 0:.1e})'
+          f'{res["base"]:.3f} ms -> {bms:.3f} ms (mode,S,WG={best}, err {ok[best]["err"] if best else 0:.1e})'
           f'{"  REPLACED" if name in chosen else ""}')
   before = sum(r['base'] for r in results.values())
-  after = sum(r['cfg'][f'{chosen[n][0]},{chosen[n][1]}']['ms'] if n in chosen else r['base'] for n, r in results.items())
+  after = sum(r['cfg'][','.join(map(str, chosen[n]))]['ms'] if n in chosen else r['base'] for n, r in results.items())
   print(f'targets: {before:.2f} ms -> {after:.2f} ms ({len(chosen)}/{len(results)} programs replaced)')
 
-  for name, (S, WG) in chosen.items():
-    jdat['programs'][name] = splitk_source(jdat['programs'][name], S, WG)
+  rows = {name: res['rows'] for name, res in results.items()}
+  for name, (mode, S, WG) in chosen.items():
+    jdat['programs'][name] = make_source(jdat['programs'][name], mode, S, WG, rows[name])
   for k in jdat['kernels']:
     if k['name'] in chosen:
-      S, WG = chosen[k['name']]
-      k['global_work_size'][0] *= S
-      k['local_work_size'] = [WG, 1, 1]
+      mode, S, WG = chosen[k['name']]
+      ngws, nlws = work_sizes(mode, S, WG, k['global_work_size'])
+      k['global_work_size'], k['local_work_size'] = list(ngws), list(nlws)
   hdr = json.dumps(jdat, ensure_ascii=False).encode('latin_1')
   with open(out_path, 'wb') as f:
     f.write(struct.pack('I', len(hdr)))

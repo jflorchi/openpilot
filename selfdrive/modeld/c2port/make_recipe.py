@@ -2,7 +2,9 @@
 """Split the rewritten model into a small recipe + references to the public original weights.
 
 usage: make_recipe.py driving_supercombo.onnx supercombo_c2_tg.onnx recipe.pkl
-The device rebuilds the full graph pickle with build_model.py from recipe.pkl + the original ONNX.
+       make_recipe.py driving_vision.onnx,driving_policy.onnx merged_c2_tg.onnx recipe.pkl   (merge_split_models.py)
+The device rebuilds the full graph pickle with build_model.py from recipe.pkl + the original ONNX file(s). With two
+originals, a weight named 'pol/<name>' refers to <name> in the policy file (src 1); refs without src are from file 0.
 """
 import pickle
 import sys
@@ -12,16 +14,27 @@ import numpy as np
 import onnx
 from onnx import numpy_helper
 
-orig = {t.name: numpy_helper.to_array(t) for t in onnx.load(sys.argv[1]).graph.initializer}
+origs = [{t.name: numpy_helper.to_array(t) for t in onnx.load(p).graph.initializer} for p in sys.argv[1].split(',')]
+PREFIXES = ['', 'pol/'][:len(origs)]
 m = onnx.load(sys.argv[2])
 g = m.graph
 
 
+def source(name):
+  for src, prefix in reversed(list(enumerate(PREFIXES))):
+    if name.startswith(prefix):
+      return src, name[len(prefix):]
+
+
 def init(t):
   arr = numpy_helper.to_array(t)
-  src = orig.get(t.name)
+  src_idx, orig_name = source(t.name)
+  src = origs[src_idx].get(orig_name)
   if src is not None and src.size == arr.size and np.array_equal(src.astype(arr.dtype).reshape(arr.shape), arr):
-    return NS(name=t.name, ref=t.name, dims=list(t.dims), data_type=t.data_type)
+    ref = NS(name=t.name, ref=orig_name, dims=list(t.dims), data_type=t.data_type)
+    if src_idx:
+      ref.src = src_idx
+    return ref
   if t.name.startswith('c2port/dup_w'):  # channel-duplication conv weights: generated on the device (too big for the proxy)
     cout, group = arr.shape[:2]
     expect = np.zeros_like(arr)

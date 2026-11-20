@@ -2,6 +2,8 @@
 """Rebuild the comma two port graph from recipe.pkl + the original driving_supercombo.onnx, with no onnx/protobuf install.
 
 usage: build_model.py recipe.pkl driving_supercombo.onnx supercombo_c2.onnxpkl
+       build_model.py recipe.pkl driving_vision.onnx,driving_policy.onnx merged_c2.onnxpkl   (split models; a weight's
+       `src` is the index of the file it comes from, 0 if absent)
 """
 import pickle
 import sys
@@ -83,7 +85,7 @@ def original_weights(path):
 
 def main(recipe_path, onnx_path, out_path):
   recipe = pickle.load(open(recipe_path, 'rb'))
-  weights = original_weights(onnx_path)
+  weights = [original_weights(p) for p in onnx_path.split(',')]
   for t in recipe.graph.initializer:
     gen = getattr(t, 'gen', None)
     if gen is not None:  # channel-duplication weights for rewritten multiplier convs
@@ -93,9 +95,11 @@ def main(recipe_path, onnx_path, out_path):
       t.raw_data, t.float_data, t.int64_data = arr.tobytes(), [], []
       del t.gen
     elif t.ref is not None:
-      arr = weights[t.ref].astype(DTYPES[t.data_type]).reshape(t.dims)
+      arr = weights[getattr(t, 'src', 0)][t.ref].astype(DTYPES[t.data_type]).reshape(t.dims)
       t.raw_data, t.float_data, t.int64_data = arr.tobytes(), [], []
     del t.ref
+    if hasattr(t, 'src'):
+      del t.src
   with open(out_path, 'wb') as f:
     pickle.dump(recipe, f, protocol=4)
   print(f'wrote {out_path}: {len(recipe.graph.node)} nodes, {len(recipe.graph.initializer)} initializers')

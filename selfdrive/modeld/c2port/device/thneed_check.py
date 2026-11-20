@@ -126,17 +126,17 @@ if __name__ == '__main__':
   path, frames = sys.argv[1], sys.argv[2]
   inputs, run = load_thneed(path)
   d = np.load(frames)
-  plan = slice(1576, 1576 + 495)
+  from port_feed import feed as port_feed, PLAN
+  out_floats = None
   for i in range(2):
     imgs = d[f'imgs{i}'].astype(np.float32)
     if int(os.environ.get('NORMALIZED', 0)): imgs = (imgs - 127.5) / 63.75  # final model: modeld normalizes
     if inputs['imgs'][1] == 128 * 256 * 32 * 4:  # channel-last model input: per pixel 4 frames x (6 channels + 2 unused)
       fr = imgs.reshape(4, 6, 128, 256).transpose(2, 3, 0, 1)
       imgs = np.concatenate([fr, np.zeros((128, 256, 4, 2), np.float32)], -1).reshape(1, 128, 256, 32)
-    feed = {'imgs': imgs, 'desire_tokens': d[f'desire{i}'], 'feat_hist': d[f'feat{i}'],
-            'traffic_convention': np.array([[1, 0]], np.float32), 'action_t': np.array([[0.275, 0.525]], np.float32)}
-    feed = {k: v for k, v in feed.items() if k in inputs}
+    feed = port_feed(d, i, {k: v[1] // 4 for k, v in inputs.items()}, imgs)
     out, _ = run(feed)
+    plan = PLAN[out.size]
     if os.environ.get('SAVE_OUT'): np.save(f"{os.environ['SAVE_OUT']}_{i}.npy", out)
     ref = d[f'out{i}'][0]
     print(f'real frame {i}: rel L2 {np.linalg.norm(out - ref) / np.linalg.norm(ref):.2e}  plan-mean max|diff| {np.abs(out[plan] - ref[plan]).max():.4f}  finite {np.isfinite(out).all()}')

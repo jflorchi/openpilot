@@ -66,9 +66,71 @@ thneed header change. 22 of 28 target programs replaced (the 9-row convs are fas
 - GPU time 32.2 -> 25.3 ms; real frames vs fp32 2.03e-3 / 1.20e-3 -> 2.04e-3 / 1.21e-3.
 - Live bench, back to back: `modelExecutionTime` median 34.5 -> 27.6 ms, 20.1 Hz, no frame drops, history check OK.
 
+## Split vision + policy models (MacroStiff and others, Dec 2025 - Jun 2026)
+
+Before June 2026 upstream shipped `driving_vision.onnx` + `driving_policy.onnx`, with modeld keeping a 25-step
+(5 Hz) feature / desire-pulse buffer. The policy only reads the last 9 features, and the two graphs' outputs (1576 +
+1000) have the same layout as the combined model, so `merge_split_models.py` folds them into the same input contract
+(`imgs`, `desire_tokens`, `feat_hist [8,512]`, `traffic_convention` -> `outputs [1,2576]`). modeld needs no change: such
+a model is just another `supercombo_c2port.thneed`.
+
+```
+merge_split_models.py driving_vision.onnx driving_policy.onnx merged.onnx   # also rebuilds the policy block in 2D
+make_c2_onnx.py merged.onnx c2.onnx                                         # skips its history rewiring for these
+strip_input_norm.py c2.onnx c2_norm.onnx
+split_input_frames.py c2_norm.onnx c2_final.onnx
+make_recipe.py driving_vision.onnx,driving_policy.onnx c2_final.onnx recipe.pkl
+```
+
+On the device: put `recipe.pkl` in `/data/c2port/<name>/` and run
+`build_split.sh <name> <upstream commit> <vision sha256> <policy sha256>` (fetch, build, tinygrad fp32 reference on the
+real frames via `make_ref.py`, check, split-K, check). Then copy `/data/c2port/<name>/supercombo_c2port.thneed` over
+`/data/c2port/supercombo_c2port.thneed` and run `install_c2port.sh` (offroad).
+
+MacroStiff (upstream `c693bc1`, policy `8c06e95e/400` on the Dark Souls 2 vision `6a7d09ad/200`): vision sha256
+`1dc66bc06f250b577653ccbeaa2c6521b3d46749f601d0a1a366419e929ca438`, policy
+`4cf2023d6742c20aac7cecbf520afe370a64bcf5efdcf3531b1b128f9dfa3cc8`. The merged and final graphs match the original pair
+(fp32, onnxruntime) to 3.4e-6 relative.
+
+WMI 🍉 (upstream `0b41b42`, policy `a27b3122/100` on the same vision): policy sha256
+`1edea5bb56f876db4cec97c150799513f6a59373f3ad152d55e4dcaab1b809e3`, 3.1e-6. Same graph and weight names as MacroStiff,
+so `recipe_macrostiff.pkl.gz` builds it too (the weights come from the policy file passed to `build_model.py`).
+
 ## Install
 
 This is the only driving model; the previous one (Nuclear Grade, `supercombo.dlc`) has been removed. `SConscript`
 builds `_modeld` with `C2PORT` on the device. The thneed isn't in git: build it with `build_final.sh` (+ `splitk.py`),
 then `install_c2port.sh` copies it to `selfdrive/modeld/models/supercombo_c2port.thneed` and rebuilds modeld. Without
 that file modeld can't start.
+
+## Cheddar (Nov 2026, single model with recurrent-state queues)
+
+Upstream PR 39255 (merge `b3ab22ef`): one `driving_supercombo.onnx`, sha256
+`350a47ea36e554fb71634c7361b2c2a2a3da07ecb211a4c6cff3d2c3013d1d82`, 34M params, 0.96 GMAC. It keeps its history inside
+the model (`state_img_q`, `state_desire_q`, `state_feat_q` in, `next_state_*` out) but reads the same frames (t-4, t)
+and features (t-32 .. t-4) as the port contract, so `make_cheddar_c2.py` maps it onto it. Differences: `desire_tokens`
+is [9,200] (one window of 25 pooled tokens per policy token, from a 132-step history), `action_t` [1,2] is a real
+input (upstream: lat / long delay + 0.05 + 0.025), and the output is 2580 floats (hidden_state at 2066, plan at 917).
+modeld picks the layout from the thneed's output size, so one `_modeld` runs both contracts.
+
+```
+make_cheddar_c2.py driving_supercombo.onnx merged.onnx    # erf-GELU, 4+1 causal transformer layers in 2D, Gemm biases
+make_c2_onnx.py merged.onnx c2.onnx
+strip_input_norm.py c2.onnx c2_norm.onnx
+split_input_frames.py c2_norm.onnx c2_final.onnx
+make_recipe.py driving_supercombo.onnx c2_final.onnx recipe.pkl
+```
+
+The original runs in fp16 (it casts its inputs to half), so check the port against an fp32 copy of it (initializers and
+Casts to float): the final graph matches to 5.6e-7. On the device: `build_onnx.sh <name> <sha256>` (fetches the ONNX
+by LFS oid from upstream's huggingface LFS server; github's media URLs 404 for it), then copy and install as above.
+`splitk.py` also has a row-blocked mode for the 9-row policy matmuls (all rows per channel group, weights read once).
+
+Device numbers: 1.1e-3 vs fp32 on real frames; GPU 48.5 ms -> 40.3 (split-K) -> 37.8 ms (+ row-blocked); live bench
+`modelExecutionTime` median 39.6 / p90 39.9 ms, 19.9 Hz, drops 0.1% (WMI: ~27.6 ms). Vision is ~21 ms of it (1x1 convs at
+~38 GMAC/s, near the ceiling found in Sep). Batching the attention (`BATCHED_ATTENTION=1`) was only 0.5 ms faster and
+less accurate in fp16, so it's off.
+
+The bench copy `/data/c2port/op` must have the same `thneed/serialize.cc` as `/data/openpilot` (program cache); a stale
+one recompiles all programs on every start (~6 min for Cheddar). modeld's stdout to a file is block-buffered: use
+`stdbuf -oL` when timing its start.

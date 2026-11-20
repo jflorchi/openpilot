@@ -59,7 +59,7 @@ static uint64_t get_ts(const VisionIpcBufExtra &extra) {
 void run_model(ModelState &model, VisionIpcClient &vipc_client_main, VisionIpcClient &vipc_client_extra, bool main_wide_camera, bool use_extra_client) {
   // messaging
   PubMaster pm({"modelV2", "cameraOdometry"});
-  SubMaster sm({"lateralPlan", "roadCameraState", "liveCalibration"});
+  SubMaster sm({"lateralPlan", "roadCameraState", "liveCalibration", "lateralDelay"});
 
   // setup filter to track dropped frames
   FirstOrderFilter frame_dropped_filter(0., 10., 1. / MODEL_FREQ);
@@ -127,6 +127,14 @@ void run_model(ModelState &model, VisionIpcClient &vipc_client_main, VisionIpcCl
       model_transform_extra = update_calibration(extrinsic_matrix_eigen, Hardware::TICI(), true);
       live_calib_seen = true;
     }
+
+#ifdef C2PORT
+    // action_t (models that take it, e.g. Cheddar): upstream's lat_delay + frame delay + half a frame, lat_delay from
+    // lagd (a total delay, like controlsd's get_lat_delay); until lagd publishes, the glen default 0.12 + 0.2
+    if (sm.rcv_frame("lateralDelay") > 0) {
+      model.action_t[0] = sm["lateralDelay"].getLateralDelay().getLateralDelay() + c2port::FRAME_DELAY + c2port::ACTION_DELAY;
+    }
+#endif
 
     float vec_desire[DESIRE_LEN] = {0};
     if (desire >= 0 && desire < DESIRE_LEN) {
